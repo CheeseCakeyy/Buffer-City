@@ -195,8 +195,8 @@ export class City {
   private height = 0;
   private columns = 0;
   private rows = 0;
-  private cw = 7;
-  private ch = 12;
+  private cw = 5;
+  private ch = 9;
   private angle = (28 * Math.PI) / 180;
   private span = 45;
   private player: Vec = [0, 0, 18];
@@ -814,7 +814,7 @@ export class City {
     this.canvas.dataset.night = String(night);
     ctx.fillStyle = night ? '#18221d' : '#faf9f5';
     ctx.fillRect(0, 0, this.width, this.height);
-    ctx.font = '12px "Courier New",monospace';
+    ctx.font = '9px "Courier New",monospace';
     ctx.textBaseline = 'top';
     for (let row = 0; row < this.rows; row++)
       for (let col = 0; col < this.columns; col++) {
