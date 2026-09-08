@@ -102,3 +102,20 @@ building collision margins and world boundaries. Browser interaction,
 visual appearance and device performance have not been manually verified.
 Optional WebMCP registration is feature-detected; no supported validation
 context was available in this run.
+
+## Second-pass renderer and navigation
+Street view now uses a 27-degree orthographic camera and a 40-unit span.
+The overview retains 35.264 degrees. Camera focus eases toward the player.
+Drag horizontally or hold Q/E to orbit, Shift to run, and Home to reset.
+
+After the surface ray pass, projected world-space line segments draw window
+frames, façade divisions, roof outlines, aerials, curb seams and lamps.
+Each character compares its interpolated depth against the nearest ray hit,
+with a small tolerance for the finite size of a character cell. This is a
+hybrid raycast surface / projected line renderer. Car cabins, lamps and
+aerials are decorative linework rather than collision volumes. Signs use
+vertical text. The player HUD marker intentionally ignores depth.
+
+Clicking walkable ground performs breadth-first search on a half-unit grid.
+The route avoids building footprints including the player clearance margin.
+Manual movement cancels the route; this search does not model moving cars.
