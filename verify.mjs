@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import ts from 'typescript';
+const source=ts.transpileModule(fs.readFileSync('lib/city.ts','utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
+const {intersectBox,canWalk,buildings}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+const b={min:[0,0,0],max:[2,2,2],name:'test',kind:'building'};
+assert.equal(intersectBox([1,1,5],[0,0,-1],b).t,3);
+assert.deepEqual(intersectBox([1,1,5],[0,0,-1],b).normal,[0,0,1]);
+assert.equal(intersectBox([3,1,5],[0,0,-1],b),null);
+assert.equal(intersectBox([1,1,5],[0,0,1],b),null);
+assert.equal(intersectBox([1,1,1],[1,0,0],b).t,1);
+assert.deepEqual(intersectBox([1,5,1],[0,-1,0],b).normal,[0,1,0]);
+assert.equal(canWalk(0,0,buildings()),true);
+assert.equal(canWalk(-12,-12,buildings()),false);
+assert.equal(canWalk(-16.2,-12,buildings()),false);
+assert.equal(canWalk(26,0,buildings()),false);
+console.log('10 ray intersection and movement collision assertions passed.');
