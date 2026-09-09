@@ -76,9 +76,12 @@ and 12 units high. Ten boxes form the main buildings. `simulate()` adds boxes
 for rooftop structures, awnings, signs, parked cars, moving vehicles,
 residents, and the player.
 
-All solid geometry is currently axis-aligned: its sides remain parallel to the
-world's X, Y, and Z axes. Decorative features such as window frames, fire
-escapes, trees, benches, and lamps are mostly 3D lines. These lines are visible
+Buildings remain axis-aligned. [`lib/street-details.ts`](lib/street-details.ts)
+builds people, vehicles, benches and doors from individually shaded solid parts.
+Each model has a local coordinate frame and yaw; rays are transformed into that
+frame before intersection, then normals are transformed back into the world.
+Wheels use capped cylinders within their bounding boxes. Decorative features
+such as upper window frames, fire escapes, trees and lamps are mostly 3D lines. These lines are visible
 and can be hidden by solid geometry, but they do not necessarily block rays or
 movement themselves.
 
@@ -94,7 +97,13 @@ moves cars and residents around deterministic routes, and rebuilds the dynamic
 objects. The movement simulation and renderer are separate. Changing
 an object's coordinates changes where the renderer finds it on the next frame.
 
-## 3. The camera is orthographic
+## 3. Orthographic and perspective cameras
+
+The third-person drawing uses the orthographic camera described below. First
+person and second person use a perspective camera: rays share an origin at the
+camera, and their directions spread across the screen. Projection divides by
+forward depth, making distant objects smaller. See [`CAMERA_VIEWS.md`](CAMERA_VIEWS.md)
+for controls and how the player is rendered in each view.
 
 `camera()` computes three unit directions: `right` points toward the right side
 of the screen, `up` points toward its top, and `direction` points into the
@@ -132,7 +141,7 @@ represent one world unit.
 
 ## 4. One ray is cast through every ASCII cell
 
-The display is divided into cells that are currently 7 CSS pixels wide and 12
+The display is divided into cells that are currently 5 CSS pixels wide and 9
 CSS pixels high. `render()` casts a ray through the center of every cell.
 
 `trace()` tests that ray against the ground and scene boxes. Ground intersection
@@ -148,7 +157,8 @@ wins because it is the first visible surface. This is how a nearby façade hides
 a road or another building behind it.
 
 Before casting rays, `buildRowBounds()` projects all eight corners of each box
-to find its screen rectangle. The box is assigned only to rows it can cover.
+to find its screen rectangle. In perspective views, edges crossing the camera's
+near plane are clipped before computing those bounds. The box is assigned only to rows it can cover.
 Each ray then tests boxes whose projected bounds include its cell. This reduces
 work without intentionally changing the visibility result.
 
@@ -231,7 +241,11 @@ lineDepth <= surfaceDepth + 0.65
 
 This makes a fire escape disappear behind a nearer building. The tolerance
 accounts for a character cell covering an area instead of one infinitely small
-pixel.
+pixel. That 0.65 tolerance applies to the distant orthographic drawing;
+perspective uses a smaller depth-dependent tolerance from 0.015 to 0.2 to keep
+background linework from bleeding through nearby model parts. Lines are clipped
+to the screen before sampling, so near-plane crossings do not create thousands
+of offscreen samples.
 
 Surface glyphs, details, and labels compete through a priority array. `stamp()`
 keeps the higher-priority character for a cell. At the end of the frame,
@@ -284,7 +298,7 @@ The **How it works** panel exposes three render modes:
 - **Depth** displays the hit distance used for visibility.
 - **Normals** colors roofs, X-facing walls, and Z-facing walls differently.
 
-The project currently has no interiors, rotated box geometry, triangle meshes,
+The project currently has no interiors, triangle meshes,
 reflections, refractions, cast-shadow rays, save system, physics traffic,
 dynamic obstacle avoidance, full resident schedules, or infinite city. See
 [`DETAILS.md`](DETAILS.md) for the code areas to change when increasing visual

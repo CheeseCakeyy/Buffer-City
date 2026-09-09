@@ -17,9 +17,17 @@ The world and collision rules are shared by all views.
 Perspective projection divides screen position by forward depth. An object twice
 as far away appears half as large. Character cells retain their actual pixel aspect
 ratio. Lines are clipped at the near plane, with reciprocal-depth interpolation
-for occlusion. The first-person camera ignores the player's own body; second person
-renders it as orange ASCII geometry. This is still the same box-based world,
-not a separate mesh engine.
+for occlusion. First person hides the head and torso around the eye, while looking
+down reveals your sleeves, hands, trousers and shoes. Second person shows the
+complete amber-jacketed character, including a face, hair, backpack and moving
+limbs. Both use the same 3D model and world-space materials.
+
+People, cars, buses, benches and doors are built in `lib/street-details.ts`.
+Their parts use local coordinates and a shared rotation, so clothing, window
+frames, lights and handles stay attached as the model turns. Wheels use capped
+cylinders for rounded silhouettes. Benches have real gaps between slats and below
+the seat. Doors have solid frames, panels, glazing, thresholds and handles;
+they remain closed exterior details. Navigation still uses building footprints.
 
 The third-person grid stays anchored to the world. Perspective uses a fixed screen
 grid: changing viewpoint necessarily changes which surface each character samples.

@@ -1,3 +1,6 @@
+import { benchModel, detailGlyph, doorModels, personModel, toLocal, toWorld, vehicleModel } from './street-details';
+import type { Finish, Frame } from './street-details';
+
 export type Vec = [number, number, number];
 export type Box = {
   min: Vec;
@@ -5,6 +8,10 @@ export type Box = {
   name: string;
   kind: string;
   detail?: string;
+  frame?: Frame;
+  finish?: Finish;
+  tint?: string;
+  feature?: string;
 };
 export type Hit = { t: number; normal: Vec; box: Box | null };
 export type CityStats = {
@@ -18,6 +25,43 @@ export type CityStats = {
 const dot = (a: Vec, b: Vec) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const mod = (n: number, m: number) => ((n % m) + m) % m;
 export function intersectBox(o: Vec, d: Vec, b: Box): Hit | null {
+  if (b.frame) {
+    o = toLocal(o, b.frame);
+    d = toLocal(d, b.frame, true);
+  }
+  // Wheels use capped elliptical cylinders along the model's X axis. Keeping
+  // their box bounds lets the existing screen-space acceleration stay valid.
+  if (b.feature === 'wheel') {
+    const cy = (b.min[1] + b.max[1]) / 2, cz = (b.min[2] + b.max[2]) / 2;
+    const ry = (b.max[1] - b.min[1]) / 2, rz = (b.max[2] - b.min[2]) / 2;
+    const oy = (o[1] - cy) / ry, oz = (o[2] - cz) / rz;
+    const dy = d[1] / ry, dz = d[2] / rz;
+    const a = dy * dy + dz * dz, h = oy * dy + oz * dz;
+    const disc = h * h - a * (oy * oy + oz * oz - 1);
+    let best = Infinity;
+    let wheelNormal: Vec = [0, 0, 0];
+    if (a > 1e-12 && disc >= 0) {
+      for (const t of [(-h - Math.sqrt(disc)) / a, (-h + Math.sqrt(disc)) / a]) {
+        const x = o[0] + d[0] * t;
+        if (t >= 0 && t < best && x >= b.min[0] && x <= b.max[0]) {
+          best = t;
+          const ny = (o[1] + t * d[1] - cy) / (ry * ry);
+          const nz = (o[2] + t * d[2] - cz) / (rz * rz);
+          const len = Math.hypot(ny, nz);
+          wheelNormal = [0, ny / len, nz / len];
+        }
+      }
+    }
+    if (Math.abs(d[0]) > 1e-9) for (const side of [-1, 1]) {
+      const t = ((side < 0 ? b.min[0] : b.max[0]) - o[0]) / d[0];
+      if (t >= 0 && t < best && (oy + t * dy) ** 2 + (oz + t * dz) ** 2 <= 1) {
+        best = t;
+        wheelNormal = [side, 0, 0];
+      }
+    }
+    return Number.isFinite(best) ? { t: best, box: b,
+      normal: b.frame ? toWorld(wheelNormal, { origin: [0, 0, 0], yaw: b.frame.yaw }) : wheelNormal } : null;
+  }
   let near = -Infinity,
     far = Infinity;
   let normal: Vec = [0, 0, 0],
@@ -47,9 +91,10 @@ export function intersectBox(o: Vec, d: Vec, b: Box): Hit | null {
     if (near > far) return null;
   }
   if (far < 0) return null;
+  const surfaceNormal = near >= 0 ? normal : exitNormal;
   return {
     t: near >= 0 ? near : far,
-    normal: near >= 0 ? normal : exitNormal,
+    normal: b.frame ? toWorld(surfaceNormal, { origin: [0, 0, 0], yaw: b.frame.yaw }) : surfaceNormal,
     box: b,
   };
 }
@@ -213,6 +258,8 @@ export class City {
   private player: Vec = [0, 0, 18];
   private clock = 540;
   private elapsed = 0;
+  private gait = 0;
+  private streetFurniture: Box[] | undefined;
   private fixed = buildings();
   private objects: Box[] = [];
   private selected = 'Click a building to inspect it.';
@@ -249,7 +296,7 @@ export class City {
     const dx = e.clientX - this.drag.x;
     if (this.perspective) {
       const dy = e.clientY - this.drag.y;
-      this.lookPitch = Math.max(-0.65, Math.min(0.65, this.lookPitch + dy * 0.004));
+      this.lookPitch = Math.max(-0.65, Math.min(this.pov === 'first' ? 1.35 : 0.65, this.lookPitch + dy * 0.004));
       this.drag.y = e.clientY;
       if (Math.abs(dy) > 2) this.drag.moved = true;
     }
@@ -487,33 +534,36 @@ export class City {
   private buildRowBounds() {
     this.rowBounds = Array.from({ length: this.rows }, () => []);
     for (const box of this.objects) {
-      if (this.pov === 'first' && box.kind === 'player') continue;
+      if (this.hiddenInFirstPerson(box)) continue;
+      const corners: Vec[] = [];
+      for (const x of [box.min[0], box.max[0]])
+        for (const y of [box.min[1], box.max[1]])
+          for (const z of [box.min[2], box.max[2]])
+            corners.push(toWorld([x, y, z], box.frame));
+      const projected = corners.map(p => this.project(p));
+      const points = projected.filter(p => !this.perspective || p[2] >= 0.08);
       if (this.perspective) {
-        const depths: number[] = [];
-        for (const x of [box.min[0], box.max[0]])
-          for (const y of [box.min[1], box.max[1]])
-            for (const z of [box.min[2], box.max[2]])
-              depths.push(this.project([x, y, z])[2]);
-        if (Math.max(...depths) < 0.08) continue;
-        if (Math.min(...depths) < 0.08) {
-          const entry = { box, left: 0, right: this.columns };
-          for (const row of this.rowBounds) row.push(entry);
-          continue;
+        // Clip all twelve bounding-box edges to the near plane. A box crossing
+        // that plane need not occupy the entire screen (especially at your feet).
+        for (let i = 0; i < 8; i++) for (const bit of [1, 2, 4]) {
+          const j = i ^ bit;
+          if (j <= i || (projected[i][2] >= 0.08) === (projected[j][2] >= 0.08)) continue;
+          const f = (0.08 - projected[i][2]) / (projected[j][2] - projected[i][2]);
+          points.push(this.project(corners[i].map((v, axis) => v + (corners[j][axis] - v) * f) as Vec));
         }
       }
+      if (!points.length) continue;
       let left = Infinity,
         right = -Infinity,
         top = Infinity,
         bottom = -Infinity;
-      for (const x of [box.min[0], box.max[0]])
-        for (const y of [box.min[1], box.max[1]])
-          for (const z of [box.min[2], box.max[2]]) {
-            const p = this.project([x, y, z]);
+      for (const p of points) {
             left = Math.min(left, p[0]);
             right = Math.max(right, p[0]);
             top = Math.min(top, p[1]);
             bottom = Math.max(bottom, p[1]);
           }
+      if (right < -this.cw || left > this.width + this.cw || bottom < -this.ch || top > this.height + this.ch) continue;
       const entry = {
         box,
         left: Math.floor((left - this.gridX) / this.cw) - 1,
@@ -544,12 +594,20 @@ export class City {
       }
     } else {
       for (const b of this.objects) {
-        if (this.pov === 'first' && b.kind === 'player') continue;
+        if (this.hiddenInFirstPerson(b)) continue;
         const hit = intersectBox(o, d, b);
         if (hit && (!nearest || hit.t < nearest.t)) nearest = hit;
       }
     }
     return nearest;
+  }
+
+  private hiddenInFirstPerson(b: Box) {
+    // Hide only parts surrounding the eye; looking down still reveals your
+    // jacket sleeves, hands, trousers and shoes in world space.
+    return this.pov === 'first' && b.kind === 'player' &&
+      !['shoe', 'trousers'].includes(b.finish || '') &&
+      b.feature !== 'sleeve' && b.feature !== 'hand';
   }
 
   private click = (e: MouseEvent) => {
@@ -587,6 +645,7 @@ export class City {
     return [-r, r - (p - r * 6), false];
   }
   private simulate(dt: number) {
+    const beforeX = this.player[0], beforeZ = this.player[2];
     if (!this.paused) {
       this.elapsed += dt;
       this.clock = mod(this.clock + dt * 4, 1440);
@@ -687,64 +746,29 @@ export class City {
         detail: b.detail,
       });
     }
-    // Parked vehicles beside the south curb.
-    for (let i = 0; i < 3; i++)
-      this.objects.push(
-        box(
-          -12 + i * 4,
-          23,
-          2.6,
-          1.15,
-          1,
-          'Parked car',
-          'car',
-          'A parked neighborhood runabout.',
-        ),
-      );
-
+    if (!this.streetFurniture) {
+      this.streetFurniture = this.fixed.flatMap(doorModels);
+      for (const [x, z] of [[-6, 12.5], [2, 12], [-17, 1]])
+        this.streetFurniture.push(...benchModel(x, z));
+      for (let i = 0; i < 3; i++)
+        this.streetFurniture.push(...vehicleModel(-10.7 + i * 4, 23.575, -Math.PI / 2, false, i, true));
+    }
+    this.objects.push(...this.streetFurniture);
     for (let i = 0; i < 6; i++) {
-      const [x, z, horizontal] = this.route(this.elapsed * 3 + i * 28, 21),
-        length = i === 0 ? 5 : 2.6;
-      this.objects.push(
-        box(
-          x - (horizontal ? length / 2 : 0.6),
-          z - (horizontal ? 0.6 : length / 2),
-          horizontal ? length : 1.2,
-          horizontal ? 1.2 : length,
-          i === 0 ? 1.7 : 1,
-          i === 0 ? 'Bus 16' : 'Car ' + (i + 1),
-          'car',
-          'Following the one-way perimeter loop.',
-        ),
-      );
+      const t = this.elapsed * 3 + i * 28;
+      const [x, z] = this.route(t, 21);
+      const [nx, nz] = this.route(t + 0.01, 21);
+      this.objects.push(...vehicleModel(x, z, Math.atan2(-(nx - x), -(nz - z)), i === 0, i));
     }
     for (let i = 0; i < 12; i++) {
-      const [x, z] = this.route(this.elapsed * 0.8 + i * 13, 18);
-      this.objects.push(
-        box(
-          x - 0.18,
-          z - 0.18,
-          0.36,
-          0.36,
-          1.45,
-          'Resident ' + (i + 1),
-          'person',
-          'Walking a simple sidewalk loop.',
-        ),
-      );
+      const t = this.elapsed * 0.8 + i * 13;
+      const [x, z] = this.route(t, 18);
+      const [nx, nz] = this.route(t + 0.01, 18);
+      this.objects.push(...personModel(x, z, Math.atan2(-(nx - x), -(nz - z)), this.elapsed * 5 + i, 0.14, i));
     }
-    this.objects.push(
-      box(
-        this.player[0] - 0.27,
-        this.player[2] - 0.27,
-        0.54,
-        0.54,
-        1.7,
-        'You',
-        'player',
-        'Your position in the 3D world.',
-      ),
-    );
+    const walked = Math.hypot(this.player[0] - beforeX, this.player[2] - beforeZ);
+    this.gait = (this.gait ?? 0) + walked * 6;
+    this.objects.push(...personModel(this.player[0], this.player[2], this.angle, this.gait, walked > 0.0001 ? 0.2 : 0, 0, true));
   }
   private glyph(
     hit: Hit,
@@ -789,6 +813,7 @@ export class City {
       }
       return [glyph, color];
     }
+    if (b.finish) return detailGlyph(b, p, n, night);
     if (b.kind === 'player') return [this.pov === 'second' ? (p[1] > 1.3 ? 'o' : '|') : ' ', night ? '#ffc66a' : '#b16b1e'];
     if (b.kind === 'person')
       return [p[1] > 1.1 ? 'o' : '|', night ? '#c2c7b4' : '#455c43'];
@@ -938,9 +963,20 @@ export class City {
     const p = this.project(a),
       q = this.project(b),
       dx = q[0] - p[0],
-      dy = q[1] - p[1],
-      steps = Math.min(4000, Math.ceil(
-        Math.max(Math.abs(dx) / this.cw, Math.abs(dy) / this.ch) * 1.3,
+      dy = q[1] - p[1];
+    let first = 0, last = 1;
+    for (const [origin, delta, lo, hi] of [[p[0], dx, -this.cw, this.width + this.cw], [p[1], dy, -this.ch, this.height + this.ch]]) {
+      if (Math.abs(delta) < 1e-9) {
+        if (origin < lo || origin > hi) return;
+      } else {
+        const a = (lo - origin) / delta, b = (hi - origin) / delta;
+        first = Math.max(first, Math.min(a, b));
+        last = Math.min(last, Math.max(a, b));
+        if (first > last) return;
+      }
+    }
+    const steps = Math.min(4000, Math.ceil(
+        Math.max(Math.abs(dx) / this.cw, Math.abs(dy) / this.ch) * (last - first) * 1.3,
       ));
     const glyph =
       Math.abs(dy) < Math.abs(dx) * 0.4
@@ -952,12 +988,13 @@ export class City {
             : '/';
     this.ctx.fillStyle = color;
     for (let i = 0; i <= steps; i++) {
-      const f = steps ? i / steps : 0,
+      const f = first + (last - first) * (steps ? i / steps : 0),
         c = Math.floor((p[0] + dx * f - this.gridX) / this.cw),
         r = Math.floor((p[1] + dy * f - this.gridY) / this.ch),
         t = this.perspective ? 1 / ((1 - f) / p[2] + f / q[2]) : p[2] + (q[2] - p[2]) * f;
       if (c < 0 || r < 0 || c >= this.columns || r >= this.rows) continue;
-      if (t <= this.depths[r * this.columns + c] + 0.65)
+      const tolerance = this.perspective ? Math.min(0.2, Math.max(0.015, t * this.cw / this.focalLength() * 0.5)) : 0.65;
+      if (t <= this.depths[r * this.columns + c] + tolerance)
         this.stamp(c, r, glyph, color, 3);
     }
   }
@@ -1025,6 +1062,9 @@ export class City {
     const ink = night ? '#bfbdad' : '#282824',
       faint = night ? '#647166' : '#929286';
     for (const b of this.objects) {
+      // Model surfaces carry their own local details. Outlining every small part
+      // would fill the spaces between limbs, wheels, and bench slats with ink.
+      if (b.finish) continue;
       if (b.kind === 'person' || b.kind === 'player') continue;
       this.outline(b, ink);
       if (b.kind === 'sign') {
@@ -1107,6 +1147,7 @@ export class City {
         this.line(pt(lo, 2.2), pt(hi, 2.2), ink);
         // Ground-floor glazed shopfronts and doors.
         for (let u = lo + 0.6; u < hi - 0.7; u += 1.4) {
+          if (Math.abs(u - (lo + hi) / 2) < 0.8) continue;
           this.line(pt(u, 0.15), pt(u, 1.9), ink);
           this.line(pt(u, 0.15), pt(Math.min(u + 1.2, hi), 0.15), ink);
         }
@@ -1173,23 +1214,6 @@ export class City {
           night ? ['#56985d', '#71b578', '#448550'][i % 3] : ['#337b3e', '#47944a', '#286b38'][i % 3],
         );
       }
-    }
-    for (const [x, z] of [
-      [-6, 12.5],
-      [2, 12],
-      [-17, 1],
-    ]) {
-      this.outline(
-        {
-          min: [x, 0.5, z],
-          max: [x + 1.7, 0.7, z + 0.5],
-          name: 'Bench',
-          kind: 'detail',
-        },
-        ink,
-      );
-      this.line([x, 0.7, z], [x, 1.25, z], ink);
-      this.line([x, 1.25, z], [x + 1.7, 1.25, z], ink);
     }
     // Zebra crossings at the two ends of each street.
     for (const edge of [-17, 17])

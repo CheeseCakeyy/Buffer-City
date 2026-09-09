@@ -5,6 +5,13 @@ richer surface patterns, more architectural linework, stronger lighting, or
 more activity in the world. Each kind belongs in a different part of
 [`lib/city.ts`](lib/city.ts).
 
+The street-detail pass is now implemented in
+[`lib/street-details.ts`](lib/street-details.ts): multipart pedestrians and player,
+animated limbs, facial features and clothing, cars and buses with rounded wheels,
+solid cabins and glazing, slatted benches, and framed doors with handles. The
+sections below describe further improvements. Static doors, benches and parked
+cars are cached; moving actors are rebuilt with updated positions and poses.
+
 A useful order is:
 
 1. Give buildings more distinctive shapes.
@@ -18,6 +25,10 @@ or character, so geometry and materials usually provide the largest visual
 improvement first.
 
 ## 1. Increase character resolution
+
+The camera-view update already changed the live grid to 5×9 cells. The example
+below records the original 7×12 settings and that change for reference; measure
+performance before reducing the current resolution further.
 
 The grid dimensions are fields on the `City` class:
 
@@ -79,10 +90,10 @@ rotates.
 
 ### Shapes the current intersection code cannot represent
 
-All boxes are axis-aligned. Rotated walls, sloping roofs, cylinders, arches,
-and irregular silhouettes need new primitive types and intersection functions.
-Possible additions include spheres for tree crowns, cylinders for poles,
-triangles for sloping roofs, and oriented boxes for rotated objects.
+Models now support boxes rotated around Y and capped cylinders along local X
+for wheels. Sloping roofs, arches and irregular silhouettes still need new
+primitive types and intersection functions. Possible additions include spheres
+for tree crowns, vertical cylinders for poles, and triangles for sloping roofs.
 
 Each new primitive needs a ray-intersection routine that returns hit distance
 and normal, projected bounds for acceleration, and a material/glyph rule. If it

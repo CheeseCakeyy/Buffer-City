@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
+const detailSource = ts.transpileModule(fs.readFileSync('lib/street-details.ts', 'utf8'), {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
+}).outputText;
+const detailUrl = 'data:text/javascript;base64,' + Buffer.from(detailSource).toString('base64');
 const source = ts.transpileModule(fs.readFileSync('lib/city.ts', 'utf8'), {
   compilerOptions: {
     target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ES2022,
   },
-}).outputText;
+}).outputText.replace("'./street-details'", JSON.stringify(detailUrl));
 const { intersectBox, canWalk, buildings } = await import(
   'data:text/javascript;base64,' + Buffer.from(source).toString('base64')
 );
@@ -48,8 +52,9 @@ function verifyPerspective(renderer) {
 for (const pov of ['first', 'second']) {
   renderer.setPOV(pov);
   renderer.lookPitch = 0.04;
-  for (const angle of [0, 0.8, 2, 3.7]) {
+  for (const angle of [0, 0.8, 2, 3.7]) for (const pitch of [-0.6, 0.04, 0.65, 1.35]) {
     renderer.angle = angle;
+    renderer.lookPitch = pitch;
     renderer.camera();
     renderer.gridX = renderer.gridY = 0;
     renderer.buildRowBounds();
@@ -64,7 +69,8 @@ for (const pov of ['first', 'second']) {
         const full = renderer.trace(o, -1, -1, d), fast = renderer.trace(o, col, row, d);
         assert.equal(full?.box, fast?.box);
         if (full) assert.ok(Math.abs(full.t - fast.t) < 1e-8);
-        if (pov === 'first') assert.notEqual(full?.box?.kind, 'player');
+        if (pov === 'first' && full?.box?.kind === 'player')
+          assert.ok(!renderer.hiddenInFirstPerson(full.box), 'First person must hide the head and torso surrounding the eye');
       }
   }
 }
@@ -105,10 +111,10 @@ const renderer = simulatedWalker();
 Object.assign(renderer, {
   width: 1280,
   height: 900,
-  cw: 7,
-  ch: 12,
-  columns: 184,
-  rows: 76,
+  cw: 5,
+  ch: 9,
+  columns: 257,
+  rows: 101,
   span: 45,
   overview: false,
 });
@@ -168,3 +174,81 @@ console.log(
     ' accelerated ray comparisons passed.',
 );
 verifyPerspective(renderer);
+
+const { toWorld, personModel, benchModel, vehicleModel, detailGlyph } = await import(detailUrl);
+// Rotation must preserve hit distances and turn the returned face normal.
+const turned = { ...b, frame: { origin: [5, 0, 7], yaw: Math.PI / 3 } };
+const origin = toWorld([1, 1, 5], turned.frame);
+const direction = toWorld([0, 0, -1], { ...turned.frame, origin: [0, 0, 0] });
+const rotatedHit = intersectBox(origin, direction, turned);
+assert.ok(Math.abs(rotatedHit.t - 3) < 1e-8);
+const expectedNormal = toWorld([0, 0, 1], { ...turned.frame, origin: [0, 0, 0] });
+expectedNormal.forEach((v, i) => assert.ok(Math.abs(v - rotatedHit.normal[i]) < 1e-8));
+
+// Multipart models must have genuine gaps, not just dark patches on a box.
+const person = personModel(0, 0, 0, 0, 0, 0, true);
+assert.ok(!person.some(p => intersectBox([0, 0.35, -2], [0, 0, 1], p)), 'Space between legs must be open');
+const bench = benchModel(0, 0);
+assert.ok(!bench.some(p => intersectBox([0.8, 0.25, -2], [0, 0, 1], p)), 'Space beneath the bench seat must be open');
+assert.ok(bench.some(p => intersectBox([0.8, 0.52, -2], [0, 0, 1], p)), 'The bench seat must occlude a ray');
+const car = vehicleModel(0, 0, 0, false, 0);
+assert.ok(car.some(p => intersectBox([0, 1.1, -3], [0, 0, 1], p)), 'Car cabin must be solid raycast geometry');
+assert.ok(!car.some(p => intersectBox([0, 0.1, -3], [0, 0, 1], p)), 'Chassis must leave clearance beneath the car');
+const wheel = car.find(p => p.feature === 'wheel');
+const midY = (wheel.min[1] + wheel.max[1]) / 2, midZ = (wheel.min[2] + wheel.max[2]) / 2;
+assert.ok(intersectBox([-2, midY, midZ], [1, 0, 0], wheel), 'Wheel axle ray must hit the cap');
+assert.equal(intersectBox([-2, wheel.max[1] - 0.01, wheel.max[2] - 0.01], [1, 0, 0], wheel), null,
+  'Rounded wheel silhouette must exclude its bounding-box corners');
+for (const part of renderer.objects) {
+  assert.ok(part.min.every((v, i) => Number.isFinite(v) && v < part.max[i]), 'All model parts must have finite positive volume');
+  if (part.finish) {
+    const p = toWorld(part.min.map((v, i) => (v + part.max[i]) / 2), part.frame);
+    for (const night of [false, true]) {
+      const [glyph, color] = detailGlyph(part, p, [0, 1, 0], night);
+      assert.equal(glyph.length, 1);
+      assert.match(color, /^#[0-9a-f]{6}$/i);
+    }
+  }
+}
+console.log('Oriented hits, open leg/bench gaps, solid vehicle cabins, and day/night detail materials passed.');
+
+// Exercise complete frames without a browser, including the detailed material
+// pass and near-plane clipping while the first-person camera looks at its feet.
+const noop = () => {};
+renderer.ctx = new Proxy({}, { get: (target, key) => target[key] ?? noop, set: (target, key, value) => { target[key] = value; return true; } });
+renderer.canvas = { dataset: {} };
+renderer.depths = new Float32Array(renderer.columns * renderer.rows);
+renderer.priorities = new Uint8Array(renderer.columns * renderer.rows);
+renderer.glyphs = Array(renderer.columns * renderer.rows).fill(' ');
+renderer.colors = Array(renderer.columns * renderer.rows).fill('');
+renderer.dpr = 1;
+renderer.mode = 'ink';
+renderer.player = [0, 0, 18];
+renderer.focus = [0, 0, 15];
+renderer.angle = 0;
+renderer.simulate(0);
+for (const pov of ['first', 'second', 'third']) {
+  renderer.setPOV(pov);
+  renderer.lookPitch = pov === 'first' ? 1.35 : 0;
+  for (const clock of [540, 1260]) {
+    renderer.clock = clock;
+    const start = performance.now();
+    renderer.render();
+    assert.ok(renderer.glyphs.some(g => g !== ' '), 'A complete frame must contain visible glyphs');
+    assert.ok(renderer.depths.every(d => !Number.isNaN(d)));
+    assert.ok(renderer.glyphs.every(g => typeof g === 'string' && g.length === 1));
+    console.log(`${pov}, ${clock === 540 ? 'day' : 'night'}: CPU frame ${Math.round(performance.now() - start)} ms (drawing calls stubbed).`);
+  }
+  if (pov === 'first') {
+    let visibleBody = false;
+    for (let row = 0; row < renderer.rows && !visibleBody; row += 3)
+      for (let col = 0; col < renderer.columns; col += 3) {
+        const px = (col + 0.5) * renderer.cw, py = (row + 0.5) * renderer.ch;
+        if (renderer.trace(renderer.ray(px, py), col, row, renderer.rayDirection(px, py))?.box?.kind === 'player') {
+          visibleBody = true;
+          break;
+        }
+      }
+    assert.ok(visibleBody, 'Looking down in first person must reveal the player body');
+  }
+}
