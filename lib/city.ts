@@ -911,6 +911,7 @@ export class City {
         ctx.fillStyle = this.colors[i];
         ctx.fillText(this.glyphs[i], x + col * this.cw, y + row * this.ch);
       }
+    if (this.mode === 'ink' && this.perspective) this.drawShopSigns(night);
     this.drawPlayer(night);
     this.drawMap(night);
   }
@@ -989,6 +990,37 @@ export class City {
         this.stamp(c, r, text[i], color, 5);
     }
   }
+  private drawShopSigns(night: boolean) {
+    const ctx = this.ctx;
+    for (const b of this.objects) {
+      if (b.kind !== 'sign') continue;
+      const top = this.project([(b.min[0] + b.max[0]) / 2, b.max[1] - 0.2, b.max[2] + 0.06]);
+      const bottom = this.project([(b.min[0] + b.max[0]) / 2, b.min[1] + 0.15, b.max[2] + 0.06]);
+      if (top[2] < 0.08 || bottom[2] < 0.08) continue;
+      const size = Math.max(12, Math.min(30, Math.abs(bottom[1] - top[1]) / b.name.length * 0.85));
+      ctx.save();
+      ctx.font = 'bold ' + size + 'px "Courier New", monospace';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = night ? '#ffd18a' : '#88421f';
+      for (let i = 0; i < b.name.length; i++) {
+        const f = i / b.name.length;
+        const p = this.project([(b.min[0] + b.max[0]) / 2,
+          b.max[1] - 0.2 - f * (b.max[1] - b.min[1] - 0.35), b.max[2] + 0.06]);
+        const x = p[0] - size * 0.3, y = top[1] + i * Math.max(size * 1.12, (bottom[1] - top[1]) / b.name.length);
+        ctx.save();
+        ctx.beginPath();
+        // Clip individual glyph cells against world depth, including partial occlusion.
+        for (let r = Math.max(0, Math.floor(y / this.ch)); r <= Math.min(this.rows - 1, Math.floor((y + size) / this.ch)); r++)
+          for (let c = Math.max(0, Math.floor(x / this.cw)); c <= Math.min(this.columns - 1, Math.floor((x + size * 0.65) / this.cw)); c++)
+            if (p[2] <= this.depths[r * this.columns + c] + 0.2)
+              ctx.rect(c * this.cw, r * this.ch, this.cw, this.ch);
+        ctx.clip();
+        ctx.fillText(b.name[i], x, y);
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+  }
   private drawDetails(night: boolean) {
     const ink = night ? '#bfbdad' : '#282824',
       faint = night ? '#647166' : '#929286';
@@ -996,6 +1028,7 @@ export class City {
       if (b.kind === 'person' || b.kind === 'player') continue;
       this.outline(b, ink);
       if (b.kind === 'sign') {
+        if (this.perspective) continue;
         this.label(
           b.name,
           [b.min[0] + 0.25, b.max[1] - 0.45, b.max[2] + 0.05],
@@ -1127,17 +1160,17 @@ export class City {
       [18, -12],
     ]) {
       this.line([x, 0, z], [x, 2.5, z], ink);
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < 320; i++) {
         const a = i * 2.39996,
-          r = Math.sqrt((i + 0.5) / 20) * 1.15;
+          r = Math.sqrt((i + 0.5) / 320) * 1.4;
         this.label(
-          i % 3 === 0 ? '&' : i % 3 === 1 ? '*' : '+',
+          i % 3 === 0 ? '&' : i % 3 === 1 ? '*' : '#',
           [
             x + Math.cos(a) * r,
-            2.7 + Math.sin(i * 1.9) * 0.65,
+            2.9 + Math.sin(i * 1.9) * 0.95 * Math.sqrt(1 - (r / 1.45) ** 2),
             z + Math.sin(a) * r,
           ],
-          night ? '#94ab7d' : '#748264',
+          night ? ['#56985d', '#71b578', '#448550'][i % 3] : ['#337b3e', '#47944a', '#286b38'][i % 3],
         );
       }
     }
