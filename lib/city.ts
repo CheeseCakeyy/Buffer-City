@@ -1,5 +1,6 @@
-import { benchModel, detailGlyph, doorModels, personModel, toLocal, toWorld, vehicleModel } from './street-details';
+import { benchModel, detailGlyph, doorModels, personModel, toWorld, vehicleModel } from './street-details';
 import type { Finish, Frame } from './street-details';
+import { GlyphAtlas } from './glyph-atlas';
 
 export type Vec = [number, number, number];
 export type Box = {
@@ -25,76 +26,85 @@ export type CityStats = {
 const dot = (a: Vec, b: Vec) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const mod = (n: number, m: number) => ((n % m) + m) % m;
 export function intersectBox(o: Vec, d: Vec, b: Box): Hit | null {
+  let ox = o[0], oy = o[1], oz = o[2], dx = d[0], dz = d[2];
+  const dy = d[1];
+  let c = 1, s = 0;
   if (b.frame) {
-    o = toLocal(o, b.frame);
-    d = toLocal(d, b.frame, true);
+    c = b.frame.cos ?? Math.cos(b.frame.yaw);
+    s = b.frame.sin ?? Math.sin(b.frame.yaw);
+    const x = ox - b.frame.origin[0], z = oz - b.frame.origin[2];
+    ox = c * x - s * z;
+    oy -= b.frame.origin[1];
+    oz = s * x + c * z;
+    dx = c * d[0] - s * d[2];
+    dz = s * d[0] + c * d[2];
   }
   // Wheels use capped elliptical cylinders along the model's X axis. Keeping
   // their box bounds lets the existing screen-space acceleration stay valid.
   if (b.feature === 'wheel') {
     const cy = (b.min[1] + b.max[1]) / 2, cz = (b.min[2] + b.max[2]) / 2;
     const ry = (b.max[1] - b.min[1]) / 2, rz = (b.max[2] - b.min[2]) / 2;
-    const oy = (o[1] - cy) / ry, oz = (o[2] - cz) / rz;
-    const dy = d[1] / ry, dz = d[2] / rz;
-    const a = dy * dy + dz * dz, h = oy * dy + oz * dz;
-    const disc = h * h - a * (oy * oy + oz * oz - 1);
+    const wy = (oy - cy) / ry, wz = (oz - cz) / rz;
+    const vy = dy / ry, vz = dz / rz;
+    const a = vy * vy + vz * vz, h = wy * vy + wz * vz;
+    const disc = h * h - a * (wy * wy + wz * wz - 1);
     let best = Infinity;
     let wheelNormal: Vec = [0, 0, 0];
     if (a > 1e-12 && disc >= 0) {
       for (const t of [(-h - Math.sqrt(disc)) / a, (-h + Math.sqrt(disc)) / a]) {
-        const x = o[0] + d[0] * t;
+        const x = ox + dx * t;
         if (t >= 0 && t < best && x >= b.min[0] && x <= b.max[0]) {
           best = t;
-          const ny = (o[1] + t * d[1] - cy) / (ry * ry);
-          const nz = (o[2] + t * d[2] - cz) / (rz * rz);
+          const ny = (oy + t * dy - cy) / (ry * ry);
+          const nz = (oz + t * dz - cz) / (rz * rz);
           const len = Math.hypot(ny, nz);
           wheelNormal = [0, ny / len, nz / len];
         }
       }
     }
-    if (Math.abs(d[0]) > 1e-9) for (const side of [-1, 1]) {
-      const t = ((side < 0 ? b.min[0] : b.max[0]) - o[0]) / d[0];
-      if (t >= 0 && t < best && (oy + t * dy) ** 2 + (oz + t * dz) ** 2 <= 1) {
+    if (Math.abs(dx) > 1e-9) for (const side of [-1, 1]) {
+      const t = ((side < 0 ? b.min[0] : b.max[0]) - ox) / dx;
+      if (t >= 0 && t < best && (wy + t * vy) ** 2 + (wz + t * vz) ** 2 <= 1) {
         best = t;
         wheelNormal = [side, 0, 0];
       }
     }
     return Number.isFinite(best) ? { t: best, box: b,
-      normal: b.frame ? toWorld(wheelNormal, { origin: [0, 0, 0], yaw: b.frame.yaw }) : wheelNormal } : null;
+      normal: [c * wheelNormal[0] + s * wheelNormal[2], wheelNormal[1], -s * wheelNormal[0] + c * wheelNormal[2]] } : null;
   }
   let near = -Infinity,
     far = Infinity;
-  let normal: Vec = [0, 0, 0],
-    exitNormal: Vec = [0, 0, 0];
+  let nearAxis = 0, farAxis = 0, nearSign = 0, farSign = 0;
   for (let a = 0; a < 3; a++) {
-    if (Math.abs(d[a]) < 1e-9) {
-      if (o[a] < b.min[a] || o[a] > b.max[a]) return null;
+    const origin = a === 0 ? ox : a === 1 ? oy : oz;
+    const direction = a === 0 ? dx : a === 1 ? dy : dz;
+    if (Math.abs(direction) < 1e-9) {
+      if (origin < b.min[a] || origin > b.max[a]) return null;
       continue;
     }
-    let t1 = (b.min[a] - o[a]) / d[a],
-      t2 = (b.max[a] - o[a]) / d[a],
+    let t1 = (b.min[a] - origin) / direction,
+      t2 = (b.max[a] - origin) / direction,
       sign = -1;
     if (t1 > t2) {
-      [t1, t2] = [t2, t1];
+      const tmp = t1; t1 = t2; t2 = tmp;
       sign = 1;
     }
     if (t1 > near) {
       near = t1;
-      normal = [0, 0, 0];
-      normal[a] = sign;
+      nearAxis = a; nearSign = sign;
     }
     if (t2 < far) {
       far = t2;
-      exitNormal = [0, 0, 0];
-      exitNormal[a] = -sign;
+      farAxis = a; farSign = -sign;
     }
     if (near > far) return null;
   }
   if (far < 0) return null;
-  const surfaceNormal = near >= 0 ? normal : exitNormal;
+  const axis = near >= 0 ? nearAxis : farAxis;
+  const sign = near >= 0 ? nearSign : farSign;
   return {
     t: near >= 0 ? near : far,
-    normal: b.frame ? toWorld(surfaceNormal, { origin: [0, 0, 0], yaw: b.frame.yaw }) : surfaceNormal,
+    normal: axis === 0 ? [c * sign || 0, 0, -s * sign || 0] : axis === 1 ? [0, sign, 0] : [s * sign || 0, 0, c * sign || 0],
     box: b,
   };
 }
@@ -279,9 +289,12 @@ export class City {
   private gridX = 0;
   private gridY = 0;
   private dpr = 1;
+  private atlas: GlyphAtlas | undefined;
+  private projectionScale = 1;
+  private projectionCenterY = 0;
   private lastPointerUpMoved = false;
   private mapCanvas: HTMLCanvasElement | null = null;
-  private rowBounds: Array<Array<{ box: Box; left: number; right: number }>> =
+  private rowBounds: Array<Array<{ box: Box; left: number; right: number; near: number; index: number }>> =
     [];
 
   overview = false;
@@ -406,6 +419,7 @@ export class City {
     this.glyphs = Array.from({ length: this.columns * this.rows }, () => '');
     this.colors = Array.from({ length: this.columns * this.rows }, () => '');
     this.dpr = dpr;
+    this.atlas = undefined;
   }
   rotate(n: number) {
     this.angle -= (n * Math.PI) / 8;
@@ -490,6 +504,8 @@ export class City {
     this.zoomBy(e.deltaY > 0 ? 1.06 : 0.94);
   };
   private camera() {
+    this.projectionScale = this.perspective ? this.focalLength() : this.viewScale();
+    this.projectionCenterY = this.viewCenterY();
     if (this.perspective) {
       const yaw = this.angle;
       const c = Math.cos(yaw), s = Math.sin(yaw);
@@ -541,10 +557,10 @@ export class City {
     return this.height * (this.width < 700 ? 0.51 : 0.6);
   }
   private ray(px: number, py: number): Vec {
-    if (this.perspective) return [...this.center];
-    const scale = 1 / this.viewScale();
+    if (this.perspective) return this.center;
+    const scale = 1 / this.projectionScale;
     const u = (px - this.width / 2) * scale,
-      v = (this.viewCenterY() - py) * scale;
+      v = (this.projectionCenterY - py) * scale;
     return [
       this.center[0] + this.right[0] * u + this.up[0] * v,
       this.center[1] + this.up[1] * v,
@@ -555,13 +571,16 @@ export class City {
   private focalLength() { return Math.max(this.width, this.height * 0.75) / (2 * Math.tan((this.fov ?? 72) * Math.PI / 360)); }
   private rayDirection(px: number, py: number): Vec {
     if (!this.perspective) return this.direction;
-    const u = (px - this.width / 2) / this.focalLength();
-    const v = (this.viewCenterY() - py) / this.focalLength();
-    return this.direction.map((d, i) => d + this.right[i] * u + this.up[i] * v) as Vec;
+    const u = (px - this.width / 2) / this.projectionScale;
+    const v = (this.projectionCenterY - py) / this.projectionScale;
+    return [this.direction[0] + this.right[0] * u + this.up[0] * v,
+      this.direction[1] + this.right[1] * u + this.up[1] * v,
+      this.direction[2] + this.right[2] * u + this.up[2] * v];
   }
   private buildRowBounds() {
     this.rowBounds = Array.from({ length: this.rows }, () => []);
-    for (const box of this.objects) {
+    for (let index = 0; index < this.objects.length; index++) {
+      const box = this.objects[index];
       if (this.hiddenFromCamera(box)) continue;
       const corners: Vec[] = [];
       for (const x of [box.min[0], box.max[0]])
@@ -594,6 +613,8 @@ export class City {
       if (right < -this.cw || left > this.width + this.cw || bottom < -this.ch || top > this.height + this.ch) continue;
       const entry = {
         box,
+        index,
+        near: Math.max(0, Math.min(...projected.map(p => p[2]))),
         left: Math.floor((left - this.gridX) / this.cw) - 1,
         right: Math.ceil((right - this.gridX) / this.cw) + 1,
       };
@@ -604,9 +625,11 @@ export class City {
         );
       for (let row = a; row <= b; row++) this.rowBounds[row].push(entry);
     }
+    for (const row of this.rowBounds) row.sort((a, b) => a.near - b.near || a.index - b.index);
   }
   private trace(o: Vec, col = -1, row = -1, d: Vec = this.direction): Hit | null {
     let nearest: Hit | null = null;
+    let nearestIndex = -1;
     const t = -o[1] / d[1];
     if (t >= 0) {
       const x = o[0] + t * d[0],
@@ -616,9 +639,13 @@ export class City {
     }
     if (row >= 0) {
       for (const entry of this.rowBounds[row]) {
+        if (nearest && entry.near > nearest.t + 1e-8) break;
         if (col < entry.left || col > entry.right) continue;
         const hit = intersectBox(o, d, entry.box);
-        if (hit && (!nearest || hit.t < nearest.t)) nearest = hit;
+        if (hit && (!nearest || hit.t < nearest.t || (hit.t === nearest.t && entry.index < nearestIndex))) {
+          nearest = hit;
+          nearestIndex = entry.index;
+        }
       }
     } else {
       for (const b of this.objects) {
@@ -940,50 +967,57 @@ export class City {
     ctx.fillRect(0, 0, this.width, this.height);
     ctx.font = '9px "Courier New",monospace';
     ctx.textBaseline = 'top';
-    for (let row = 0; row < this.rows; row++)
+    const perspective = this.perspective, scale = 1 / this.projectionScale;
+    const origin: Vec = [...this.center], direction: Vec = [...this.direction];
+    const hitPoint: Vec = [0, 0, 0];
+    for (let row = 0; row < this.rows; row++) {
+      const offsetY = this.projectionCenterY - (this.gridY + (row + 0.5) * this.ch);
+      const v = perspective ? offsetY / this.projectionScale : offsetY * scale;
       for (let col = 0; col < this.columns; col++) {
-        const o = this.ray(
-            this.gridX + (col + 0.5) * this.cw,
-            this.gridY + (row + 0.5) * this.ch,
-          ),
-          d = this.rayDirection(this.gridX + (col + 0.5) * this.cw, this.gridY + (row + 0.5) * this.ch),
-          hit = this.trace(o, col, row, d);
+        const offsetX = this.gridX + (col + 0.5) * this.cw - this.width / 2;
+        const u = perspective ? offsetX / this.projectionScale : offsetX * scale;
+        if (perspective) {
+          direction[0] = this.direction[0] + this.right[0] * u + this.up[0] * v;
+          direction[1] = this.direction[1] + this.right[1] * u + this.up[1] * v;
+          direction[2] = this.direction[2] + this.right[2] * u + this.up[2] * v;
+        } else {
+          origin[0] = this.center[0] + this.right[0] * u + this.up[0] * v;
+          origin[1] = this.center[1] + this.up[1] * v;
+          origin[2] = this.center[2] + this.right[2] * u + this.up[2] * v;
+        }
+        const hit = this.trace(origin, col, row, direction);
         if (!hit) continue;
         this.depths[row * this.columns + col] = hit.t;
-        const p: Vec = [
-          o[0] + d[0] * hit.t,
-          o[1] + d[1] * hit.t,
-          o[2] + d[2] * hit.t,
-        ];
-        const [g, color] = this.glyph(hit, p, col, row, night);
+        hitPoint[0] = origin[0] + direction[0] * hit.t;
+        hitPoint[1] = origin[1] + direction[1] * hit.t;
+        hitPoint[2] = origin[2] + direction[2] * hit.t;
+        const [g, color] = this.glyph(hit, hitPoint, col, row, night);
         if (g !== ' ') this.stamp(col, row, g, color);
       }
+    }
     if (this.mode === 'ink') this.drawDetails(night);
     // Draw each cell once. Overlapping line samples no longer build X-shaped ink blobs.
     const x = Math.round(this.gridX * this.dpr) / this.dpr,
       y = Math.round(this.gridY * this.dpr) / this.dpr;
+    this.atlas ??= new GlyphAtlas(this.cw, this.ch, ctx.font, this.dpr);
     for (let row = 0; row < this.rows; row++)
       for (let col = 0; col < this.columns; col++) {
         const i = row * this.columns + col;
         if (this.glyphs[i] === ' ') continue;
-        ctx.fillStyle = this.colors[i];
-        ctx.fillText(this.glyphs[i], x + col * this.cw, y + row * this.ch);
+        this.atlas.draw(ctx, this.glyphs[i], this.colors[i], x + col * this.cw, y + row * this.ch);
       }
     if (this.mode === 'ink' && this.perspective) this.drawShopSigns(night);
     this.drawPlayer(night);
     this.drawMap(night);
   }
   private project(p: Vec): [number, number, number] {
-    const v: Vec = [
-        p[0] - this.center[0],
-        p[1] - this.center[1],
-        p[2] - this.center[2],
-      ],
-      scale = this.perspective ? this.focalLength() / Math.max(0.08, dot(v, this.direction)) : this.viewScale();
+    const x = p[0] - this.center[0], y = p[1] - this.center[1], z = p[2] - this.center[2];
+    const depth = x * this.direction[0] + y * this.direction[1] + z * this.direction[2];
+    const scale = this.perspective ? this.projectionScale / Math.max(0.08, depth) : this.projectionScale;
     return [
-      this.width / 2 + dot(v, this.right) * scale,
-      this.viewCenterY() - dot(v, this.up) * scale,
-      dot(v, this.direction),
+      this.width / 2 + (x * this.right[0] + y * this.right[1] + z * this.right[2]) * scale,
+      this.projectionCenterY - (x * this.up[0] + y * this.up[1] + z * this.up[2]) * scale,
+      depth,
     ];
   }
   private line(a: Vec, b: Vec, color: string) {
@@ -1019,14 +1053,13 @@ export class City {
           : dx * dy > 0
             ? '\\'
             : '/';
-    this.ctx.fillStyle = color;
     for (let i = 0; i <= steps; i++) {
       const f = first + (last - first) * (steps ? i / steps : 0),
         c = Math.floor((p[0] + dx * f - this.gridX) / this.cw),
         r = Math.floor((p[1] + dy * f - this.gridY) / this.ch),
         t = this.perspective ? 1 / ((1 - f) / p[2] + f / q[2]) : p[2] + (q[2] - p[2]) * f;
       if (c < 0 || r < 0 || c >= this.columns || r >= this.rows) continue;
-      const tolerance = this.perspective ? Math.min(0.2, Math.max(0.015, t * this.cw / this.focalLength() * 0.5)) : 0.65;
+      const tolerance = this.perspective ? Math.min(0.2, Math.max(0.015, t * this.cw / this.projectionScale * 0.5)) : 0.65;
       if (t <= this.depths[r * this.columns + c] + tolerance)
         this.stamp(c, r, glyph, color, 3);
     }
@@ -1046,7 +1079,6 @@ export class City {
   private label(text: string, at: Vec, color: string, vertical = false) {
     const p = this.project(at);
     if (this.perspective && p[2] < 0.08) return;
-    this.ctx.fillStyle = color;
     for (let i = 0; i < text.length; i++) {
       const c = Math.floor((p[0] - this.gridX) / this.cw) + (vertical ? 0 : i),
         r = Math.floor((p[1] - this.gridY) / this.ch) + (vertical ? i : 0);

@@ -15,12 +15,12 @@ export type Finish =
   | 'lamp'
   | 'tail'
   | 'display';
-export type Frame = { origin: Vec; yaw: number };
+export type Frame = { origin: Vec; yaw: number; cos?: number; sin?: number };
 
 export function toWorld(p: Vec, frame?: Frame): Vec {
   if (!frame) return p;
-  const c = Math.cos(frame.yaw),
-    s = Math.sin(frame.yaw);
+  const c = frame.cos ?? Math.cos(frame.yaw),
+    s = frame.sin ?? Math.sin(frame.yaw);
   return [
     frame.origin[0] + c * p[0] + s * p[2],
     frame.origin[1] + p[1],
@@ -31,8 +31,8 @@ export function toWorld(p: Vec, frame?: Frame): Vec {
 export function toLocal(p: Vec, frame: Frame, vector = false): Vec {
   const x = p[0] - (vector ? 0 : frame.origin[0]);
   const z = p[2] - (vector ? 0 : frame.origin[2]);
-  const c = Math.cos(frame.yaw),
-    s = Math.sin(frame.yaw);
+  const c = frame.cos ?? Math.cos(frame.yaw),
+    s = frame.sin ?? Math.sin(frame.yaw);
   return [c * x - s * z, p[1] - (vector ? 0 : frame.origin[1]), s * x + c * z];
 }
 
@@ -44,7 +44,7 @@ function model(
   detail: string,
 ) {
   const parts: Box[] = [];
-  const frame = { origin, yaw };
+  const frame = { origin, yaw, cos: Math.cos(yaw), sin: Math.sin(yaw) };
   const add = (
     min: Vec,
     max: Vec,

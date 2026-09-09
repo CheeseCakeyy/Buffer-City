@@ -5,12 +5,17 @@ const detailSource = ts.transpileModule(fs.readFileSync('lib/street-details.ts',
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
 }).outputText;
 const detailUrl = 'data:text/javascript;base64,' + Buffer.from(detailSource).toString('base64');
+const atlasSource = ts.transpileModule(fs.readFileSync('lib/glyph-atlas.ts', 'utf8'), {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
+}).outputText;
+const atlasUrl = 'data:text/javascript;base64,' + Buffer.from(atlasSource).toString('base64');
 const source = ts.transpileModule(fs.readFileSync('lib/city.ts', 'utf8'), {
   compilerOptions: {
     target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ES2022,
   },
-}).outputText.replace("'./street-details'", JSON.stringify(detailUrl));
+}).outputText.replace("'./street-details'", JSON.stringify(detailUrl))
+  .replace("'./glyph-atlas'", JSON.stringify(atlasUrl)) + '\n//# sourceURL=city-test.js';
 const { intersectBox, canWalk, buildings } = await import(
   'data:text/javascript;base64,' + Buffer.from(source).toString('base64')
 );
@@ -211,6 +216,37 @@ for (const part of renderer.objects) {
     }
   }
 }
+
+// Cached glyphs must retain color, alignment, density and overhang without
+// asking Canvas to rasterize the same text for every occupied screen cell.
+const { GlyphAtlas } = await import(atlasUrl);
+const paints = [], copies = [];
+const painter = {
+  setTransform(...args) { this.transform = args; },
+  fillText(glyph, x, y) { paints.push({ glyph, x, y, color: this.fillStyle, font: this.font, transform: this.transform }); },
+};
+globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => painter }) };
+const destination = { drawImage(...args) { copies.push(args); } };
+const atlas = new GlyphAtlas(5, 9, '9px "Courier New",monospace', 2);
+atlas.draw(destination, '#', '#abc123', 10, 20);
+atlas.draw(destination, '#', '#abc123', 15, 20);
+assert.equal(paints.length, 1, 'Repeated glyph/color must reuse one rasterization');
+assert.equal(copies.length, 2);
+assert.equal(copies[0][0], copies[1][0], 'Repeated glyphs share the atlas page');
+assert.deepEqual(copies[0].slice(1, 5), copies[1].slice(1, 5), 'Repeated glyphs share the source rectangle');
+assert.deepEqual(copies[0].slice(5), [7, 17, 11, 15], 'Sprite padding must preserve glyph screen alignment');
+assert.deepEqual(paints[0].transform, [2, 0, 0, 2, 0, 0]);
+atlas.draw(destination, '#', '#ffe3a0', 20, 20);
+assert.equal(paints.length, 2, 'Different day/night colors need distinct sprites');
+assert.equal(paints[1].color, '#ffe3a0');
+for (const dpr of [1, 1.25, 1.5, 2]) {
+  const scaled = new GlyphAtlas(5, 9, '9px "Courier New",monospace', dpr);
+  scaled.draw(destination, '/', '#123abc', 40, 40);
+  assert.ok(Number.isInteger(paints.at(-1).x * dpr), 'Atlas glyph origin should align to device pixels');
+  const copy = copies.at(-1);
+  assert.equal(copy[3] / copy[7], dpr, 'Atlas source/destination scale must match display density');
+}
+console.log('Glyph atlas reuse, color changes, padding and 1x/1.25x/1.5x/2x display density passed.');
 console.log('Oriented hits, open leg/bench gaps, solid vehicle cabins, and day/night detail materials passed.');
 
 // Follow view must stay behind the character, with movement aligned to its
@@ -272,6 +308,10 @@ console.log('Follow-camera placement, WASD at four headings, turn controls, zoom
 // Exercise complete frames without a browser, including the detailed material
 // pass and near-plane clipping while the first-person camera looks at its feet.
 const noop = () => {};
+globalThis.document = { createElement: () => ({ width: 0, height: 0,
+  getContext: () => new Proxy({}, { get: (target, key) => target[key] ?? noop,
+    set: (target, key, value) => { target[key] = value; return true; } }),
+}) };
 renderer.ctx = new Proxy({}, { get: (target, key) => target[key] ?? noop, set: (target, key, value) => { target[key] = value; return true; } });
 renderer.canvas = { dataset: {} };
 renderer.depths = new Float32Array(renderer.columns * renderer.rows);
