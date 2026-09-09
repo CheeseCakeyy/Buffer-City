@@ -749,3 +749,12 @@ main:has(canvas[data-night='true']) .touch-controls button {
     font-size: 10px;
   }
 }
+.camera-controls select {
+  font: inherit;
+  color: inherit;
+  background: var(--paper, #faf9f5);
+  border: 0;
+  border-bottom: 1px solid #9996;
+  padding: 5px 2px;
+  max-width: 170px;
+}

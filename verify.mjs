@@ -44,6 +44,32 @@ assert.equal(
   oldPath,
   'A blocked destination must not replace the valid route',
 );
+function verifyPerspective(renderer) {
+for (const pov of ['first', 'second']) {
+  renderer.setPOV(pov);
+  renderer.lookPitch = 0.04;
+  for (const angle of [0, 0.8, 2, 3.7]) {
+    renderer.angle = angle;
+    renderer.camera();
+    renderer.gridX = renderer.gridY = 0;
+    renderer.buildRowBounds();
+    for (let row = 1; row < renderer.rows; row += 9)
+      for (let col = 1; col < renderer.columns; col += 13) {
+        const px = (col + 0.5) * renderer.cw, py = (row + 0.5) * renderer.ch;
+        const o = renderer.ray(px, py), d = renderer.rayDirection(px, py);
+        const point = o.map((v, i) => v + d[i] * 8);
+        const projected = renderer.project(point);
+        assert.ok(Math.abs(projected[0] - px) < 1e-7);
+        assert.ok(Math.abs(projected[1] - py) < 1e-7);
+        const full = renderer.trace(o, -1, -1, d), fast = renderer.trace(o, col, row, d);
+        assert.equal(full?.box, fast?.box);
+        if (full) assert.ok(Math.abs(full.t - fast.t) < 1e-8);
+        if (pov === 'first') assert.notEqual(full?.box?.kind, 'player');
+      }
+  }
+}
+console.log('Perspective projection round trips and accelerated rays passed in both POVs.');
+}
 console.log(
   'Click-to-walk route, collision clearance and blocked destination checks passed.',
 );
@@ -141,3 +167,4 @@ console.log(
     comparisons +
     ' accelerated ray comparisons passed.',
 );
+verifyPerspective(renderer);
