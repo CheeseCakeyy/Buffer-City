@@ -1,16 +1,31 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
+const detailsSource = ts.transpileModule(fs.readFileSync('lib/details.ts', 'utf8'), {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
+}).outputText;
+const detailsURL = 'data:text/javascript;base64,' + Buffer.from(detailsSource).toString('base64');
+const { createScenery, windowAt, windowIsLit, trafficProgress, residentProgress, materialGlyph } = await import(detailsURL);
 const source = ts.transpileModule(fs.readFileSync('lib/city.ts', 'utf8'), {
   compilerOptions: {
     target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ES2022,
   },
-}).outputText;
+}).outputText.replace("'./details'", JSON.stringify(detailsURL));
 const { intersectBox, canWalk, buildings } = await import(
   'data:text/javascript;base64,' + Buffer.from(source).toString('base64')
 );
 const b = { min: [0, 0, 0], max: [2, 2, 2], name: 'test', kind: 'building' };
+const scenery = createScenery(buildings());
+assert(scenery.some(b => b.kind === 'column'));
+assert(scenery.some(b => b.kind === 'balcony'));
+assert.equal(canWalk(6.8, -8.9, scenery), false);
+assert.equal(trafficProgress(14, 0).distance, trafficProgress(16, 0).distance);
+assert.equal(residentProgress(20, 0).distance, residentProgress(23, 0).distance);
+const house = buildings()[0];
+assert(windowAt(house, house.facade.margin + 0.1, house.facade.floorHeight + 0.1, house.max[0] - house.min[0]).inside);
+assert.equal(windowIsLit(1, 2, 3), windowIsLit(1, 2, 3));
+assert.equal(materialGlyph('metal', 0, 0.5), '|');
 assert.equal(intersectBox([1, 1, 5], [0, 0, -1], b).t, 3);
 assert.deepEqual(intersectBox([1, 1, 5], [0, 0, -1], b).normal, [0, 0, 1]);
 assert.equal(intersectBox([3, 1, 5], [0, 0, -1], b), null);

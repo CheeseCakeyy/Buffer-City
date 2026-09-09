@@ -1,3 +1,4 @@
+import { createScenery, describeBuildings, DEFAULT_FACADE, windowAt, windowIsLit, materialGlyph, trafficProgress, residentProgress, lightPhase, type Material, type Facade } from './details';
 export type Vec = [number, number, number];
 export type Box = {
   min: Vec;
@@ -5,6 +6,9 @@ export type Box = {
   name: string;
   kind: string;
   detail?: string;
+  material?: Material;
+  facade?: Facade;
+  seed?: number;
 };
 export type Hit = { t: number; normal: Vec; box: Box | null };
 export type CityStats = {
@@ -79,7 +83,7 @@ function box(
   return { min: [x, 0, z], max: [x + w, h, z + d], name, kind, detail };
 }
 export function buildings(): Box[] {
-  return [
+  return describeBuildings([
     box(
       -16,
       -16,
@@ -180,7 +184,7 @@ export function buildings(): Box[] {
       'building',
       'A small meeting room on the garden side.',
     ),
-  ];
+  ]);
 }
 export class City {
   keys = new Set<string>();
@@ -203,6 +207,8 @@ export class City {
   private clock = 540;
   private elapsed = 0;
   private fixed = buildings();
+  private scenery: Box[] | null = null;
+  private shadowCache = new Map<number, boolean>();
   private objects: Box[] = [];
   private selected = 'Click a building to inspect it.';
   private selectedName = '';
@@ -252,7 +258,8 @@ export class City {
         Math.round(this.player[2] / step),
       ],
       end = [Math.round(x / step), Math.round(z / step)];
-    if (!canWalk(end[0] * step, end[1] * step, this.fixed)) return false;
+    this.scenery ??= createScenery(this.fixed);
+    if (!canWalk(end[0] * step, end[1] * step, this.scenery)) return false;
     const key = (a: number, b: number) => a + ',' + b,
       queue = [start],
       seen = new Map<string, number[] | null>([
@@ -275,7 +282,7 @@ export class City {
         const a = c[0] + dx,
           b = c[1] + dz,
           k = key(a, b);
-        if (!seen.has(k) && canWalk(a * step, b * step, this.fixed)) {
+        if (!seen.has(k) && canWalk(a * step, b * step, this.scenery)) {
           seen.set(k, c);
           queue.push([a, b]);
         }
@@ -567,8 +574,9 @@ export class City {
         speed = dt * (this.keys.has('shift') ? 8 : 4);
       const x = this.player[0] + (dx * c + dz * s) * speed,
         z = this.player[2] + (-dx * s + dz * c) * speed;
-      if (canWalk(x, this.player[2], this.fixed)) this.player[0] = x;
-      if (canWalk(this.player[0], z, this.fixed)) this.player[2] = z;
+      this.scenery ??= createScenery(this.fixed);
+      if (canWalk(x, this.player[2], this.scenery)) this.player[0] = x;
+      if (canWalk(this.player[0], z, this.scenery)) this.player[2] = z;
     }
     const fx = this.player[0] - this.focus[0],
       fz = this.player[2] - this.focus[2],
@@ -580,65 +588,11 @@ export class City {
       this.focus[0] += fx * amount;
       this.focus[2] += fz * amount;
     }
-    this.objects = [...this.fixed];
-    for (let i = 0; i < this.fixed.length; i++) {
-      const b = this.fixed[i],
-        x = b.min[0] + 1.2,
-        z = b.min[2] + 1.3,
-        y = b.max[1];
-      if (i % 3 === 0)
-        this.objects.push({
-          min: [x, y, z],
-          max: [x + 2.5, y + 0.7, z + 1.2],
-          name: b.name,
-          kind: 'roof',
-          detail: b.detail,
-        });
-      if (i === 2 || i === 4 || i === 6) {
-        const Z = b.max[2];
-        this.objects.push({
-          min: [b.min[0] + 0.3, 2, Z],
-          max: [b.max[0] - 0.3, 2.45, Z + 0.9],
-          name: b.name,
-          kind: 'awning',
-          detail: b.detail,
-        });
-      }
-    }
-    for (const [i, text] of [
-      [0, 'MAPLE'],
-      [2, 'CAFE'],
-      [4, 'RADIO'],
-      [5, 'HOTEL'],
-      [6, 'RECORDS'],
-    ] as [number, string][]) {
-      const b = this.fixed[i],
-        h = Math.min(b.max[1] - 0.3, 2.4 + text.length * 0.6);
-      this.objects.push({
-        min: [b.max[0], 2.0, b.max[2] + 0.2],
-        max: [b.max[0] + 0.9, h, b.max[2] + 0.45],
-        name: text,
-        kind: 'sign',
-        detail: b.detail,
-      });
-    }
-    // Parked vehicles beside the south curb.
-    for (let i = 0; i < 3; i++)
-      this.objects.push(
-        box(
-          -12 + i * 4,
-          23,
-          2.6,
-          1.15,
-          1,
-          'Parked car',
-          'car',
-          'A parked neighborhood runabout.',
-        ),
-      );
+    this.scenery ??= createScenery(this.fixed);
+    this.objects = [...this.scenery];
 
     for (let i = 0; i < 6; i++) {
-      const [x, z, horizontal] = this.route(this.elapsed * 3 + i * 28, 21),
+      const [x, z, horizontal] = this.route(trafficProgress(this.elapsed, i).distance, 21),
         length = i === 0 ? 5 : 2.6;
       this.objects.push(
         box(
@@ -654,7 +608,7 @@ export class City {
       );
     }
     for (let i = 0; i < 12; i++) {
-      const [x, z] = this.route(this.elapsed * 0.8 + i * 13, 18);
+      const [x, z] = this.route(residentProgress(this.elapsed, i).distance, 18);
       this.objects.push(
         box(
           x - 0.18,
@@ -664,7 +618,7 @@ export class City {
           1.45,
           'Resident ' + (i + 1),
           'person',
-          'Walking a simple sidewalk loop.',
+          residentProgress(this.elapsed, i).waiting ? 'Pausing on the sidewalk.' : 'Walking the neighborhood.',
         ),
       );
     }
@@ -680,6 +634,18 @@ export class City {
         'Your position in the 3D world.',
       ),
     );
+  }
+  private groundShadow(p: Vec) {
+    this.shadowCache ??= new Map();
+    const x = Math.floor(p[0] * 2), z = Math.floor(p[2] * 2);
+    const key = (x + 52) * 105 + z + 52;
+    const cached = this.shadowCache.get(key);
+    if (cached !== undefined) return cached;
+    this.scenery ??= createScenery(this.fixed);
+    const origin: Vec = [(x + 0.5) / 2, 0.04, (z + 0.5) / 2];
+    const shadow = this.scenery.some(b => intersectBox(origin, [-0.5, 0.8, 0.32], b) !== null);
+    this.shadowCache.set(key, shadow);
+    return shadow;
   }
   private glyph(
     hit: Hit,
@@ -722,6 +688,10 @@ export class City {
         glyph = mod(p[0], 1) < 0.09 || mod(p[2], 1) < 0.09 ? '+' : '.';
         color = night ? '#52614e' : '#b6baa7';
       }
+      if (!night && this.groundShadow(p)) {
+        if (glyph === ' ') glyph = '.';
+        color = '#939589';
+      }
       return [glyph, color];
     }
     if (b.kind === 'player') return [' ', night ? '#ffc66a' : '#b16b1e'];
@@ -758,29 +728,20 @@ export class City {
     } else {
       const u = n[0] ? p[2] - b.min[2] : p[0] - b.min[0];
       const width = n[0] ? b.max[2] - b.min[2] : b.max[0] - b.min[0];
-      const windowStart = Math.floor((u - 0.8) / 2) * 2 + 0.8,
-        floorY = Math.floor(p[1] / 2.7) * 2.7;
-      const window =
-        windowStart >= 0.79 &&
-        windowStart < width - 1.2 &&
-        u - windowStart < 1.1 &&
-        floorY >= 2.69 &&
-        floorY < b.max[1] - 1 &&
-        p[1] - floorY < 1.35;
+      const window = windowAt(b, u, p[1] - b.min[1], width);
       const edge =
         Math.min(u, (n[0] ? b.max[2] - b.min[2] : b.max[0] - b.min[0]) - u) <
         0.2;
       if (edge) glyph = '|';
       else if (p[1] < 0.2 || b.max[1] - p[1] < 0.15) glyph = '_';
-      else if (window) {
+      else if (b.kind === 'building' && window.inside) {
         glyph = ' ';
-        if (night && mod(Math.floor(u / 2) + Math.floor(p[1] / 2.7), 3) !== 0) {
+        if (night && windowIsLit(b.seed ?? 0, window.floor, window.column)) {
           color = '#d6a355';
           glyph = '#';
         }
       } else
-        glyph =
-          mod(Math.floor(u * 3) + Math.floor(p[1] * 3), 3) === 0 ? '.' : ' ';
+        glyph = materialGlyph(b.material ?? 'concrete', u, p[1] - b.min[1]);
     }
     if (b.name === this.selectedName) color = night ? '#e1b870' : '#9b642d';
     return [glyph, color];
@@ -810,9 +771,9 @@ export class City {
     this.priorities.fill(0);
     this.glyphs.fill(' ');
     const ctx = this.ctx,
-      night = this.clock > 1080 || this.clock < 360;
+      night = lightPhase(this.clock) === 'night';
     this.canvas.dataset.night = String(night);
-    ctx.fillStyle = night ? '#18221d' : '#faf9f5';
+    ctx.fillStyle = night ? '#18221d' : lightPhase(this.clock) === 'dawn' ? '#f5eee1' : lightPhase(this.clock) === 'dusk' ? '#f0e5db' : '#faf9f5';
     ctx.fillRect(0, 0, this.width, this.height);
     ctx.font = '9px "Courier New",monospace';
     ctx.textBaseline = 'top';
@@ -921,6 +882,13 @@ export class City {
     for (const b of this.objects) {
       if (b.kind === 'person' || b.kind === 'player') continue;
       this.outline(b, ink);
+      if (b.kind === 'balcony') {
+        const [x, , z] = b.min, [X, h, Z] = b.max;
+        this.line([X, h + 0.9, z], [X, h + 0.9, Z], ink);
+        for (let u = z; u <= Z; u += 0.5)
+          this.line([X, h, u], [X, h + 0.9, u], faint);
+        this.line([x, h + 0.9, z], [X, h + 0.9, z], ink);
+      }
       if (b.kind === 'sign') {
         this.label(
           b.name,
@@ -983,23 +951,29 @@ export class City {
           plane = side === 0 ? z : side === 1 ? Z : side === 2 ? x : X;
         const pt = (u: number, y: number): Vec =>
           alongX ? [u, y, plane] : [plane, y, u];
-        for (let y = 2.7; y < h - 1; y += 2.7)
-          for (let u = lo + 0.8; u < hi - 1.2; u += 2) {
+        const f = b.facade ?? DEFAULT_FACADE;
+        for (let y = b.min[1] + (b.min[1] > 0 ? 0.5 : f.floorHeight); y + f.windowHeight < h - 0.15; y += f.floorHeight)
+          for (let u = lo + f.margin; u + f.windowWidth <= hi - f.margin + 0.001; u += f.windowWidth + f.windowGap) {
             const a = pt(u, y),
-              b1 = pt(u + 1.1, y),
-              c = pt(u + 1.1, y + 1.35),
-              d = pt(u, y + 1.35);
+              b1 = pt(u + f.windowWidth, y),
+              c = pt(u + f.windowWidth, y + f.windowHeight),
+              d = pt(u, y + f.windowHeight);
             this.line(a, b1, ink);
             this.line(b1, c, ink);
             this.line(c, d, ink);
             this.line(d, a, ink);
             if (b.name.includes('Hotel') || b.name.includes('Maple'))
-              this.line(pt(u + 0.55, y), pt(u + 0.55, y + 1.35), faint);
+              this.line(pt(u + f.windowWidth / 2, y), pt(u + f.windowWidth / 2, y + f.windowHeight), faint);
           }
 
+        if (b.min[1] > 0) continue;
         this.line(pt(lo, 2.2), pt(hi, 2.2), ink);
+        const door = lo + (hi - lo - 1) * f.entranceOffset;
+        this.line(pt(door, 0), pt(door, 2), ink);
+        this.line(pt(door, 2), pt(door + 1, 2), ink);
+        this.line(pt(door + 1, 2), pt(door + 1, 0), ink);
         // Ground-floor glazed shopfronts and doors.
-        for (let u = lo + 0.6; u < hi - 0.7; u += 1.4) {
+        for (let u = lo + 0.6; f.shopfront && u < hi - 0.7; u += 1.4) {
           this.line(pt(u, 0.15), pt(u, 1.9), ink);
           this.line(pt(u, 0.15), pt(Math.min(u + 1.2, hi), 0.15), ink);
         }
