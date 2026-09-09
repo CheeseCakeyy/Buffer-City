@@ -102,6 +102,12 @@ export default function Home() {
           Click a street to walk · drag to look around
         </div>
         <div className="camera-controls">
+          <select aria-label="Point of view" value={stats.pov ?? 'third'}
+            onChange={e => engine.current?.setPOV(e.target.value as 'third' | 'second' | 'first')}>
+            <option value="third">3rd · Drawing</option>
+            <option value="first">1st · Through your eyes</option>
+            <option value="second">2nd · Facing you</option>
+          </select>
           <button
             className={overview ? 'active' : ''}
             onClick={() => {
@@ -204,7 +210,14 @@ export default function Home() {
                 </p>
               </li>
               <li>
-                <h3>02 / Place an orthographic camera</h3>
+                <h3>02 / Choose a camera</h3>
+                <p>
+                  First person places a perspective camera at eye height. Second
+                  person places it ahead of you, looking back: W walks toward
+                  the camera. Perspective rays fan outward and objects shrink
+                  with distance. Drag to turn; in first person, drag vertically
+                  to look up or down. The third-person drawing keeps parallel rays.
+                </p>
                 <p>
                   Street view looks down at 27°, with a closer camera with a
                   three-unit dead zone. Small movements leave the drawing still;

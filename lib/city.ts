@@ -12,6 +12,7 @@ export type CityStats = {
   fps: number;
   cells: number;
   overview?: boolean;
+  pov?: 'third' | 'second' | 'first';
   selected: string;
 };
 const dot = (a: Vec, b: Vec) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -183,6 +184,16 @@ export function buildings(): Box[] {
   ];
 }
 export class City {
+  pov: 'third' | 'second' | 'first' = 'third';
+  private lookPitch = 0.04;
+  private fov = 72;
+  private get perspective() { return this.pov === 'first' || this.pov === 'second'; }
+  setPOV(pov: 'third' | 'second' | 'first') {
+    this.pov = pov;
+    this.overview = false;
+    this.path = [];
+    this.focus = [...this.player];
+  }
   keys = new Set<string>();
   paused = false;
   mode = 'ink';
@@ -224,6 +235,7 @@ export class City {
 
   overview = false;
   setOverview() {
+    this.pov = 'third';
     this.overview = !this.overview;
     this.span = this.overview ? 72 : 45;
   }
@@ -235,6 +247,12 @@ export class City {
   private pointermove = (e: PointerEvent) => {
     if (!this.drag) return;
     const dx = e.clientX - this.drag.x;
+    if (this.perspective) {
+      const dy = e.clientY - this.drag.y;
+      this.lookPitch = Math.max(-0.65, Math.min(0.65, this.lookPitch + dy * 0.004));
+      this.drag.y = e.clientY;
+      if (Math.abs(dy) > 2) this.drag.moved = true;
+    }
     if (Math.abs(dx) > 2 || this.drag.moved) {
       this.angle -= dx * 0.006;
       this.drag.moved = true;
@@ -339,6 +357,10 @@ export class City {
     this.angle += (n * Math.PI) / 8;
   }
   zoomBy(n: number) {
+    if (this.perspective) {
+      this.fov = Math.max(45, Math.min(100, this.fov * n));
+      return;
+    }
     this.span = Math.max(28, Math.min(100, this.span * n));
   }
   reset() {
@@ -400,6 +422,25 @@ export class City {
     this.zoomBy(e.deltaY > 0 ? 1.06 : 0.94);
   };
   private camera() {
+    if (this.perspective) {
+      const yaw = this.angle + (this.pov === 'second' ? Math.PI : 0);
+      const c = Math.cos(yaw), s = Math.sin(yaw);
+      const e = this.pov === 'second' ? 0.12 : this.lookPitch;
+      this.right = [c, 0, -s];
+      this.up = [-s * Math.sin(e), Math.cos(e), -c * Math.sin(e)];
+      this.direction = [-s * Math.cos(e), -Math.sin(e), -c * Math.cos(e)];
+      this.center = [this.player[0], 1.65, this.player[2]];
+      if (this.pov === 'second') {
+        const toward: Vec = [-Math.sin(this.angle), 0.12, -Math.cos(this.angle)];
+        let distance = 5;
+        for (const b of this.fixed) {
+          const hit = intersectBox(this.center, toward, b);
+          if (hit) distance = Math.min(distance, Math.max(0.35, hit.t - 0.3));
+        }
+        this.center = this.center.map((v, i) => v + toward[i] * distance) as Vec;
+      }
+      return;
+    }
     const c = Math.cos(this.angle),
       s = Math.sin(this.angle),
       e = ((this.overview ? 35.264 : 27) * Math.PI) / 180;
@@ -421,9 +462,11 @@ export class City {
     );
   }
   private viewCenterY() {
+    if (this.perspective) return this.height / 2;
     return this.height * (this.width < 700 ? 0.51 : 0.6);
   }
   private ray(px: number, py: number): Vec {
+    if (this.perspective) return [...this.center];
     const scale = 1 / this.viewScale();
     const u = (px - this.width / 2) * scale,
       v = (this.viewCenterY() - py) * scale;
@@ -434,9 +477,30 @@ export class City {
     ];
   }
 
+  private focalLength() { return Math.max(this.width, this.height * 0.75) / (2 * Math.tan((this.fov ?? 72) * Math.PI / 360)); }
+  private rayDirection(px: number, py: number): Vec {
+    if (!this.perspective) return this.direction;
+    const u = (px - this.width / 2) / this.focalLength();
+    const v = (this.height / 2 - py) / this.focalLength();
+    return this.direction.map((d, i) => d + this.right[i] * u + this.up[i] * v) as Vec;
+  }
   private buildRowBounds() {
     this.rowBounds = Array.from({ length: this.rows }, () => []);
     for (const box of this.objects) {
+      if (this.pov === 'first' && box.kind === 'player') continue;
+      if (this.perspective) {
+        const depths: number[] = [];
+        for (const x of [box.min[0], box.max[0]])
+          for (const y of [box.min[1], box.max[1]])
+            for (const z of [box.min[2], box.max[2]])
+              depths.push(this.project([x, y, z])[2]);
+        if (Math.max(...depths) < 0.08) continue;
+        if (Math.min(...depths) < 0.08) {
+          const entry = { box, left: 0, right: this.columns };
+          for (const row of this.rowBounds) row.push(entry);
+          continue;
+        }
+      }
       let left = Infinity,
         right = -Infinity,
         top = Infinity,
@@ -463,8 +527,7 @@ export class City {
       for (let row = a; row <= b; row++) this.rowBounds[row].push(entry);
     }
   }
-  private trace(o: Vec, col = -1, row = -1): Hit | null {
-    const d = this.direction;
+  private trace(o: Vec, col = -1, row = -1, d: Vec = this.direction): Hit | null {
     let nearest: Hit | null = null;
     const t = -o[1] / d[1];
     if (t >= 0) {
@@ -481,6 +544,7 @@ export class City {
       }
     } else {
       for (const b of this.objects) {
+        if (this.pov === 'first' && b.kind === 'player') continue;
         const hit = intersectBox(o, d, b);
         if (hit && (!nearest || hit.t < nearest.t)) nearest = hit;
       }
@@ -493,7 +557,8 @@ export class City {
     this.canvas.focus();
     const r = this.canvas.getBoundingClientRect(),
       o = this.ray(e.clientX - r.left, e.clientY - r.top),
-      hit = this.trace(o);
+      d = this.rayDirection(e.clientX - r.left, e.clientY - r.top),
+      hit = this.trace(o, -1, -1, d);
     if (!hit) {
       this.selected = 'Choose a street or sidewalk inside the block.';
       return;
@@ -507,8 +572,8 @@ export class City {
       return;
     }
     const started = this.walkTo(
-      o[0] + hit.t * this.direction[0],
-      o[2] + hit.t * this.direction[2],
+      o[0] + hit.t * d[0],
+      o[2] + hit.t * d[2],
     );
     this.selected = started
       ? 'Walking there. WASD takes over at any time.'
@@ -724,7 +789,7 @@ export class City {
       }
       return [glyph, color];
     }
-    if (b.kind === 'player') return [' ', night ? '#ffc66a' : '#b16b1e'];
+    if (b.kind === 'player') return [this.pov === 'second' ? (p[1] > 1.3 ? 'o' : '|') : ' ', night ? '#ffc66a' : '#b16b1e'];
     if (b.kind === 'person')
       return [p[1] > 1.1 ? 'o' : '|', night ? '#c2c7b4' : '#455c43'];
     if (b.kind === 'car')
@@ -805,6 +870,7 @@ export class City {
     const anchor = this.project([0, 0, 0]);
     this.gridX = mod(anchor[0], this.cw) - this.cw;
     this.gridY = mod(anchor[1], this.ch) - this.ch;
+    if (this.perspective) { this.gridX = 0; this.gridY = 0; }
     this.buildRowBounds();
     this.depths.fill(Infinity);
     this.priorities.fill(0);
@@ -822,13 +888,14 @@ export class City {
             this.gridX + (col + 0.5) * this.cw,
             this.gridY + (row + 0.5) * this.ch,
           ),
-          hit = this.trace(o, col, row);
+          d = this.rayDirection(this.gridX + (col + 0.5) * this.cw, this.gridY + (row + 0.5) * this.ch),
+          hit = this.trace(o, col, row, d);
         if (!hit) continue;
         this.depths[row * this.columns + col] = hit.t;
         const p: Vec = [
-          o[0] + this.direction[0] * hit.t,
-          o[1] + this.direction[1] * hit.t,
-          o[2] + this.direction[2] * hit.t,
+          o[0] + d[0] * hit.t,
+          o[1] + d[1] * hit.t,
+          o[2] + d[2] * hit.t,
         ];
         const [g, color] = this.glyph(hit, p, col, row, night);
         if (g !== ' ') this.stamp(col, row, g, color);
@@ -853,7 +920,7 @@ export class City {
         p[1] - this.center[1],
         p[2] - this.center[2],
       ],
-      scale = this.viewScale();
+      scale = this.perspective ? this.focalLength() / Math.max(0.08, dot(v, this.direction)) : this.viewScale();
     return [
       this.width / 2 + dot(v, this.right) * scale,
       this.viewCenterY() - dot(v, this.up) * scale,
@@ -861,13 +928,19 @@ export class City {
     ];
   }
   private line(a: Vec, b: Vec, color: string) {
+    if (this.perspective) {
+      const az = this.project(a)[2], bz = this.project(b)[2];
+      if (az < 0.08 && bz < 0.08) return;
+      if (az < 0.08) a = a.map((v, i) => v + (b[i] - v) * ((0.08 - az) / (bz - az))) as Vec;
+      else if (bz < 0.08) b = b.map((v, i) => v + (a[i] - v) * ((0.08 - bz) / (az - bz))) as Vec;
+    }
     const p = this.project(a),
       q = this.project(b),
       dx = q[0] - p[0],
       dy = q[1] - p[1],
-      steps = Math.ceil(
+      steps = Math.min(4000, Math.ceil(
         Math.max(Math.abs(dx) / this.cw, Math.abs(dy) / this.ch) * 1.3,
-      );
+      ));
     const glyph =
       Math.abs(dy) < Math.abs(dx) * 0.4
         ? '_'
@@ -881,7 +954,7 @@ export class City {
       const f = steps ? i / steps : 0,
         c = Math.floor((p[0] + dx * f - this.gridX) / this.cw),
         r = Math.floor((p[1] + dy * f - this.gridY) / this.ch),
-        t = p[2] + (q[2] - p[2]) * f;
+        t = this.perspective ? 1 / ((1 - f) / p[2] + f / q[2]) : p[2] + (q[2] - p[2]) * f;
       if (c < 0 || r < 0 || c >= this.columns || r >= this.rows) continue;
       if (t <= this.depths[r * this.columns + c] + 0.65)
         this.stamp(c, r, glyph, color, 3);
@@ -901,6 +974,7 @@ export class City {
   }
   private label(text: string, at: Vec, color: string, vertical = false) {
     const p = this.project(at);
+    if (this.perspective && p[2] < 0.08) return;
     this.ctx.fillStyle = color;
     for (let i = 0; i < text.length; i++) {
       const c = Math.floor((p[0] - this.gridX) / this.cw) + (vertical ? 0 : i),
@@ -1101,6 +1175,7 @@ export class City {
     }
   }
   private drawPlayer(night: boolean) {
+    if (this.perspective) return;
     const p = this.project([this.player[0], 1.2, this.player[2]]),
       ink = night ? '#ffc16f' : '#b35325';
     const ctx = this.ctx;
@@ -1207,6 +1282,7 @@ export class City {
         fps: Math.round((this.frames * 1000) / (now - this.reportAt)),
         cells: this.columns * this.rows,
         overview: this.overview,
+        pov: this.pov,
         selected: this.selected,
       });
       this.frames = 0;
