@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
+const detailSource = ts.transpileModule(fs.readFileSync('lib/street-details.ts', 'utf8'), {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
+}).outputText;
+const detailUrl = 'data:text/javascript;base64,' + Buffer.from(detailSource).toString('base64');
 const source = ts.transpileModule(fs.readFileSync('lib/city.ts', 'utf8'), {
   compilerOptions: {
     target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ES2022,
   },
-}).outputText;
+}).outputText.replace("'./street-details'", JSON.stringify(detailUrl));
 const { intersectBox, canWalk, buildings } = await import(
   'data:text/javascript;base64,' + Buffer.from(source).toString('base64')
 );
@@ -48,8 +52,10 @@ function verifyPerspective(renderer) {
 for (const pov of ['first', 'second']) {
   renderer.setPOV(pov);
   renderer.lookPitch = 0.04;
-  for (const angle of [0, 0.8, 2, 3.7]) {
+  for (const angle of [0, 0.8, 2, 3.7]) for (const pitch of [-0.6, 0.04, 0.65, 1.35]) {
     renderer.angle = angle;
+    renderer.lookPitch = pitch;
+    renderer.followPitch = Math.max(0.12, Math.min(0.85, pitch));
     renderer.camera();
     renderer.gridX = renderer.gridY = 0;
     renderer.buildRowBounds();
@@ -64,7 +70,8 @@ for (const pov of ['first', 'second']) {
         const full = renderer.trace(o, -1, -1, d), fast = renderer.trace(o, col, row, d);
         assert.equal(full?.box, fast?.box);
         if (full) assert.ok(Math.abs(full.t - fast.t) < 1e-8);
-        if (pov === 'first') assert.notEqual(full?.box?.kind, 'player');
+        if (pov === 'first' && full?.box?.kind === 'player')
+          assert.ok(!renderer.hiddenFromCamera(full.box), 'First person must hide the head and torso surrounding the eye');
       }
   }
 }
@@ -105,10 +112,10 @@ const renderer = simulatedWalker();
 Object.assign(renderer, {
   width: 1280,
   height: 900,
-  cw: 7,
-  ch: 12,
-  columns: 184,
-  rows: 76,
+  cw: 5,
+  ch: 9,
+  columns: 257,
+  rows: 101,
   span: 45,
   overview: false,
 });
@@ -168,3 +175,137 @@ console.log(
     ' accelerated ray comparisons passed.',
 );
 verifyPerspective(renderer);
+
+const { toWorld, personModel, benchModel, vehicleModel, detailGlyph } = await import(detailUrl);
+// Rotation must preserve hit distances and turn the returned face normal.
+const turned = { ...b, frame: { origin: [5, 0, 7], yaw: Math.PI / 3 } };
+const origin = toWorld([1, 1, 5], turned.frame);
+const direction = toWorld([0, 0, -1], { ...turned.frame, origin: [0, 0, 0] });
+const rotatedHit = intersectBox(origin, direction, turned);
+assert.ok(Math.abs(rotatedHit.t - 3) < 1e-8);
+const expectedNormal = toWorld([0, 0, 1], { ...turned.frame, origin: [0, 0, 0] });
+expectedNormal.forEach((v, i) => assert.ok(Math.abs(v - rotatedHit.normal[i]) < 1e-8));
+
+// Multipart models must have genuine gaps, not just dark patches on a box.
+const person = personModel(0, 0, 0, 0, 0, 0, true);
+assert.ok(!person.some(p => intersectBox([0, 0.35, -2], [0, 0, 1], p)), 'Space between legs must be open');
+const bench = benchModel(0, 0);
+assert.ok(!bench.some(p => intersectBox([0.8, 0.25, -2], [0, 0, 1], p)), 'Space beneath the bench seat must be open');
+assert.ok(bench.some(p => intersectBox([0.8, 0.52, -2], [0, 0, 1], p)), 'The bench seat must occlude a ray');
+const car = vehicleModel(0, 0, 0, false, 0);
+assert.ok(car.some(p => intersectBox([0, 1.1, -3], [0, 0, 1], p)), 'Car cabin must be solid raycast geometry');
+assert.ok(!car.some(p => intersectBox([0, 0.1, -3], [0, 0, 1], p)), 'Chassis must leave clearance beneath the car');
+const wheel = car.find(p => p.feature === 'wheel');
+const midY = (wheel.min[1] + wheel.max[1]) / 2, midZ = (wheel.min[2] + wheel.max[2]) / 2;
+assert.ok(intersectBox([-2, midY, midZ], [1, 0, 0], wheel), 'Wheel axle ray must hit the cap');
+assert.equal(intersectBox([-2, wheel.max[1] - 0.01, wheel.max[2] - 0.01], [1, 0, 0], wheel), null,
+  'Rounded wheel silhouette must exclude its bounding-box corners');
+for (const part of renderer.objects) {
+  assert.ok(part.min.every((v, i) => Number.isFinite(v) && v < part.max[i]), 'All model parts must have finite positive volume');
+  if (part.finish) {
+    const p = toWorld(part.min.map((v, i) => (v + part.max[i]) / 2), part.frame);
+    for (const night of [false, true]) {
+      const [glyph, color] = detailGlyph(part, p, [0, 1, 0], night);
+      assert.equal(glyph.length, 1);
+      assert.match(color, /^#[0-9a-f]{6}$/i);
+    }
+  }
+}
+console.log('Oriented hits, open leg/bench gaps, solid vehicle cabins, and day/night detail materials passed.');
+
+// Follow view must stay behind the character, with movement aligned to its
+// forward/right basis at every yaw. These checks catch the former half-turn.
+for (const angle of [0, Math.PI / 2, Math.PI, 4.3]) {
+  const follower = simulatedWalker();
+  follower.player = [0, 0, 0];
+  follower.path = [];
+  follower.fixed = [];
+  follower.angle = angle;
+  follower.setPOV('second');
+  follower.camera();
+  const forward = [-Math.sin(angle), 0, -Math.cos(angle)];
+  const right = [Math.cos(angle), 0, -Math.sin(angle)];
+  const dot = (a, b) => a.reduce((sum, v, i) => sum + v * b[i], 0);
+  assert.ok(dot(follower.center, forward) < -2, 'Follow camera must be behind the player');
+  assert.ok(dot(follower.direction, forward) > 0.9, 'Camera must look forward along the player heading');
+  assert.ok(follower.center[1] > 1.7, 'Default follow camera must clear the player head');
+  follower.fixed = buildings();
+  for (const [key, axis, sign] of [['w', forward, 1], ['s', forward, -1], ['d', right, 1], ['a', right, -1]]) {
+    follower.player = [0, 0, 0];
+    follower.keys = new Set([key]);
+    follower.simulate(0.05);
+    assert.ok(Math.abs(dot(follower.player, axis) - sign * 0.2) < 1e-8, `${key} must agree with the view at yaw ${angle}`);
+  }
+  follower.keys.clear();
+  follower.zoomBy(0.8);
+  assert.ok(follower.followDistance < 5.5, 'Follow zoom-in must shorten the camera boom');
+  follower.recenter();
+  assert.equal(follower.followDistance, 5.5);
+  assert.equal(follower.followPitch, 0.24);
+  const yaw = follower.angle;
+  follower.rotate(-1);
+  assert.ok(follower.angle > yaw, 'Rotate-left button must turn left');
+  follower.angle = yaw;
+  follower.keys.add('q');
+  follower.simulate(0.05);
+  assert.ok(follower.angle > yaw, 'Q must turn left');
+  follower.angle = yaw;
+  follower.keys = new Set(['e']);
+  follower.simulate(0.05);
+  assert.ok(follower.angle < yaw, 'E must turn right');
+}
+const nearWall = simulatedWalker();
+nearWall.player = [0, 0, 0];
+nearWall.path = [];
+nearWall.angle = 0;
+nearWall.fixed = [{ min: [-2, 0, 2], max: [2, 5, 4], name: 'Wall behind', kind: 'building' }];
+nearWall.setPOV('second');
+nearWall.camera();
+assert.ok(nearWall.center[2] < 1.82 && nearWall.center[2] > 0, 'Follow camera must stop before the padded wall');
+const sight = nearWall.direction.map(v => -v);
+assert.ok(intersectBox([0, 1.1, 0], sight, nearWall.fixed[0]).t > Math.hypot(...nearWall.center.map((v, i) => v - [0, 1.1, 0][i])));
+nearWall.fixed[0].min[2] = 0.5;
+nearWall.camera();
+assert.ok(nearWall.hiddenFromCamera(person[0]), 'A retracted camera must not render the inside of the avatar');
+console.log('Follow-camera placement, WASD at four headings, turn controls, zoom/reset and wall clearance passed.');
+
+// Exercise complete frames without a browser, including the detailed material
+// pass and near-plane clipping while the first-person camera looks at its feet.
+const noop = () => {};
+renderer.ctx = new Proxy({}, { get: (target, key) => target[key] ?? noop, set: (target, key, value) => { target[key] = value; return true; } });
+renderer.canvas = { dataset: {} };
+renderer.depths = new Float32Array(renderer.columns * renderer.rows);
+renderer.priorities = new Uint8Array(renderer.columns * renderer.rows);
+renderer.glyphs = Array(renderer.columns * renderer.rows).fill(' ');
+renderer.colors = Array(renderer.columns * renderer.rows).fill('');
+renderer.dpr = 1;
+renderer.mode = 'ink';
+renderer.player = [0, 0, 18];
+renderer.focus = [0, 0, 15];
+renderer.angle = 0;
+renderer.simulate(0);
+for (const pov of ['first', 'second', 'third']) {
+  renderer.setPOV(pov);
+  renderer.lookPitch = pov === 'first' ? 1.35 : 0;
+  for (const clock of [540, 1260]) {
+    renderer.clock = clock;
+    const start = performance.now();
+    renderer.render();
+    assert.ok(renderer.glyphs.some(g => g !== ' '), 'A complete frame must contain visible glyphs');
+    assert.ok(renderer.depths.every(d => !Number.isNaN(d)));
+    assert.ok(renderer.glyphs.every(g => typeof g === 'string' && g.length === 1));
+    console.log(`${pov}, ${clock === 540 ? 'day' : 'night'}: CPU frame ${Math.round(performance.now() - start)} ms (drawing calls stubbed).`);
+  }
+  if (pov === 'first') {
+    let visibleBody = false;
+    for (let row = 0; row < renderer.rows && !visibleBody; row += 3)
+      for (let col = 0; col < renderer.columns; col += 3) {
+        const px = (col + 0.5) * renderer.cw, py = (row + 0.5) * renderer.ch;
+        if (renderer.trace(renderer.ray(px, py), col, row, renderer.rayDirection(px, py))?.box?.kind === 'player') {
+          visibleBody = true;
+          break;
+        }
+      }
+    assert.ok(visibleBody, 'Looking down in first person must reveal the player body');
+  }
+}
