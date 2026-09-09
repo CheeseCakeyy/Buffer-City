@@ -55,6 +55,7 @@ for (const pov of ['first', 'second']) {
   for (const angle of [0, 0.8, 2, 3.7]) for (const pitch of [-0.6, 0.04, 0.65, 1.35]) {
     renderer.angle = angle;
     renderer.lookPitch = pitch;
+    renderer.followPitch = Math.max(0.12, Math.min(0.85, pitch));
     renderer.camera();
     renderer.gridX = renderer.gridY = 0;
     renderer.buildRowBounds();
@@ -70,7 +71,7 @@ for (const pov of ['first', 'second']) {
         assert.equal(full?.box, fast?.box);
         if (full) assert.ok(Math.abs(full.t - fast.t) < 1e-8);
         if (pov === 'first' && full?.box?.kind === 'player')
-          assert.ok(!renderer.hiddenInFirstPerson(full.box), 'First person must hide the head and torso surrounding the eye');
+          assert.ok(!renderer.hiddenFromCamera(full.box), 'First person must hide the head and torso surrounding the eye');
       }
   }
 }
@@ -211,6 +212,62 @@ for (const part of renderer.objects) {
   }
 }
 console.log('Oriented hits, open leg/bench gaps, solid vehicle cabins, and day/night detail materials passed.');
+
+// Follow view must stay behind the character, with movement aligned to its
+// forward/right basis at every yaw. These checks catch the former half-turn.
+for (const angle of [0, Math.PI / 2, Math.PI, 4.3]) {
+  const follower = simulatedWalker();
+  follower.player = [0, 0, 0];
+  follower.path = [];
+  follower.fixed = [];
+  follower.angle = angle;
+  follower.setPOV('second');
+  follower.camera();
+  const forward = [-Math.sin(angle), 0, -Math.cos(angle)];
+  const right = [Math.cos(angle), 0, -Math.sin(angle)];
+  const dot = (a, b) => a.reduce((sum, v, i) => sum + v * b[i], 0);
+  assert.ok(dot(follower.center, forward) < -2, 'Follow camera must be behind the player');
+  assert.ok(dot(follower.direction, forward) > 0.9, 'Camera must look forward along the player heading');
+  assert.ok(follower.center[1] > 1.7, 'Default follow camera must clear the player head');
+  follower.fixed = buildings();
+  for (const [key, axis, sign] of [['w', forward, 1], ['s', forward, -1], ['d', right, 1], ['a', right, -1]]) {
+    follower.player = [0, 0, 0];
+    follower.keys = new Set([key]);
+    follower.simulate(0.05);
+    assert.ok(Math.abs(dot(follower.player, axis) - sign * 0.2) < 1e-8, `${key} must agree with the view at yaw ${angle}`);
+  }
+  follower.keys.clear();
+  follower.zoomBy(0.8);
+  assert.ok(follower.followDistance < 5.5, 'Follow zoom-in must shorten the camera boom');
+  follower.recenter();
+  assert.equal(follower.followDistance, 5.5);
+  assert.equal(follower.followPitch, 0.24);
+  const yaw = follower.angle;
+  follower.rotate(-1);
+  assert.ok(follower.angle > yaw, 'Rotate-left button must turn left');
+  follower.angle = yaw;
+  follower.keys.add('q');
+  follower.simulate(0.05);
+  assert.ok(follower.angle > yaw, 'Q must turn left');
+  follower.angle = yaw;
+  follower.keys = new Set(['e']);
+  follower.simulate(0.05);
+  assert.ok(follower.angle < yaw, 'E must turn right');
+}
+const nearWall = simulatedWalker();
+nearWall.player = [0, 0, 0];
+nearWall.path = [];
+nearWall.angle = 0;
+nearWall.fixed = [{ min: [-2, 0, 2], max: [2, 5, 4], name: 'Wall behind', kind: 'building' }];
+nearWall.setPOV('second');
+nearWall.camera();
+assert.ok(nearWall.center[2] < 1.82 && nearWall.center[2] > 0, 'Follow camera must stop before the padded wall');
+const sight = nearWall.direction.map(v => -v);
+assert.ok(intersectBox([0, 1.1, 0], sight, nearWall.fixed[0]).t > Math.hypot(...nearWall.center.map((v, i) => v - [0, 1.1, 0][i])));
+nearWall.fixed[0].min[2] = 0.5;
+nearWall.camera();
+assert.ok(nearWall.hiddenFromCamera(person[0]), 'A retracted camera must not render the inside of the avatar');
+console.log('Follow-camera placement, WASD at four headings, turn controls, zoom/reset and wall clearance passed.');
 
 // Exercise complete frames without a browser, including the detailed material
 // pass and near-plane clipping while the first-person camera looks at its feet.

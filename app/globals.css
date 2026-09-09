@@ -758,3 +758,86 @@ main:has(canvas[data-night='true']) .touch-controls button {
   padding: 5px 2px;
   max-width: 170px;
 }
+
+/* Keep camera controls legible without covering the walking area. */
+.camera-controls {
+  gap: 4px;
+  padding: 6px;
+  max-width: calc(100% - 32px);
+  border: 1px solid #d8d5c9;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px #202b2410;
+}
+.camera-controls select {
+  min-height: 44px;
+  max-width: 200px;
+  border: 0;
+  border-radius: 5px;
+  padding: 8px 10px;
+  font: 14px monospace;
+  background: transparent;
+}
+.camera-controls button {
+  min-width: 40px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: 5px;
+}
+.camera-controls button:hover {
+  background: #9d764914;
+  text-decoration: none;
+}
+.camera-controls select:focus-visible {
+  outline: 2px solid #b87927;
+  outline-offset: 1px;
+}
+.legend {
+  bottom: 143px;
+  max-width: calc(100% - 36px);
+  padding: 5px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: normal;
+  text-align: center;
+  pointer-events: none;
+}
+.world[data-pov='second'] > canvas {
+  cursor: grab;
+}
+.world[data-pov='second'] > canvas:active {
+  cursor: grabbing;
+}
+main:has(canvas[data-night='true']) .camera-controls {
+  border-color: #445044;
+}
+main:has(canvas[data-night='true']) .camera-controls select {
+  color-scheme: dark;
+}
+@media (max-width: 800px) {
+  .camera-controls {
+    width: min(460px, calc(100% - 24px));
+    max-width: none;
+    flex-wrap: wrap;
+    gap: 3px;
+    bottom: 92px;
+  }
+  .camera-controls select {
+    flex: 0 0 100%;
+    max-width: none;
+    border-bottom: 1px solid #9994;
+  }
+  .camera-controls button {
+    font-size: 13px;
+    padding: 7px 5px;
+    flex: 1 1 auto;
+  }
+  .legend {
+    bottom: 204px;
+    width: calc(100% - 32px);
+    font-size: 11px;
+  }
+  .touch-controls { bottom: 266px; }
+  .neighborhood-map { bottom: 250px; }
+  .explanation { bottom: 80px; }
+}

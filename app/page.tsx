@@ -15,6 +15,12 @@ export default function Home() {
     selected: 'Click a building to inspect it.',
   });
   const overview = stats.overview ?? false;
+  const pov = stats.pov ?? 'third';
+  const cameraHint = pov === 'second'
+    ? 'W forward · S back · A / D sidestep · drag to turn · scroll for distance'
+    : pov === 'first'
+      ? 'WASD to walk · drag to look around · look down to see your feet'
+      : 'Click a street to walk · drag to orbit · scroll to zoom';
   useEffect(() => {
     if (!canvas.current) return;
     const city = new City(canvas.current, setStats);
@@ -85,28 +91,34 @@ export default function Home() {
           </div>
         </div>
         <div className="header-right">
-          <button onClick={() => setPanel(!panel)}>How it works ↗</button>
+          <button aria-expanded={panel} aria-controls="city-explanation" onClick={() => setPanel(!panel)}>How it works ↗</button>
         </div>
       </header>
-      <section className="world" aria-label="Explorable ASCII city">
+      <section className="world" data-pov={pov} aria-label="Explorable ASCII city">
         <canvas
           ref={canvas}
           tabIndex={0}
+          aria-describedby="camera-hint"
           aria-label="Click a street to walk there. WASD or arrows to walk, Shift to run, drag to orbit, Q and E to rotate. Scroll to zoom."
         />
 
         <div className="clock">
           <strong>{stats.time}</strong>
         </div>
-        <div className="legend">
-          Click a street to walk · drag to look around
+        <div className="legend" id="camera-hint">
+          {cameraHint}
         </div>
         <div className="camera-controls">
-          <select aria-label="Point of view" value={stats.pov ?? 'third'}
-            onChange={e => engine.current?.setPOV(e.target.value as 'third' | 'second' | 'first')}>
-            <option value="third">3rd · Drawing</option>
+          <select aria-label="Point of view" value={pov}
+            onChange={e => {
+              const next = e.target.value as 'third' | 'second' | 'first';
+              engine.current?.setPOV(next);
+              setStats(s => ({ ...s, pov: next, overview: false }));
+              canvas.current?.focus({ preventScroll: true });
+            }}>
+            <option value="third">City drawing</option>
             <option value="first">1st · Through your eyes</option>
-            <option value="second">2nd · Facing you</option>
+            <option value="second">2nd · Follow behind</option>
           </select>
           <button
             className={overview ? 'active' : ''}
@@ -114,7 +126,7 @@ export default function Home() {
               engine.current?.setOverview();
             }}
           >
-            {overview ? 'Street view' : 'Whole block'}
+            {overview ? 'Street drawing' : 'Whole block'}
           </button>
           <button
             aria-label="Rotate left"
@@ -129,13 +141,13 @@ export default function Home() {
             ↷
           </button>
           <button
-            aria-label="Zoom out"
+            aria-label={pov === 'second' ? 'Move camera farther away' : 'Zoom out'}
             onClick={() => engine.current?.zoomBy(1.15)}
           >
             −
           </button>
           <button
-            aria-label="Zoom in"
+            aria-label={pov === 'second' ? 'Move camera closer' : 'Zoom in'}
             onClick={() => engine.current?.zoomBy(0.87)}
           >
             +
@@ -145,7 +157,7 @@ export default function Home() {
               engine.current?.recenter();
             }}
           >
-            Find me
+            Reset view
           </button>
         </div>
         <div className="neighborhood-map">
@@ -173,15 +185,15 @@ export default function Home() {
                   ['arrowup', 'arrowleft', 'arrowdown', 'arrowright'][i],
                 );
               }}
-              onPointerUp={() => engine.current?.keys.clear()}
-              onPointerCancel={() => engine.current?.keys.clear()}
+              onPointerUp={() => engine.current?.keys.delete(['arrowup', 'arrowleft', 'arrowdown', 'arrowright'][i])}
+              onPointerCancel={() => engine.current?.keys.delete(['arrowup', 'arrowleft', 'arrowdown', 'arrowright'][i])}
             >
               {label}
             </button>
           ))}
         </div>
         {panel && (
-          <aside className="explanation">
+          <aside className="explanation" id="city-explanation">
             <div className="panel-title">
               <span className="eyebrow">UNDER THE CHARACTERS</span>
               <button
@@ -212,11 +224,13 @@ export default function Home() {
               <li>
                 <h3>02 / Choose a camera</h3>
                 <p>
-                  First person places a perspective camera at eye height. Second
-                  person places it ahead of you, looking back: W walks toward
-                  the camera. Perspective rays fan outward and objects shrink
-                  with distance. Drag to turn; in first person, drag vertically
-                  to look up or down. The third-person drawing keeps parallel rays.
+                  First person places a perspective camera at eye height. Follow
+                  behind places it above and behind your character: W moves
+                  forward, S moves backward, and A / D sidestep left and right.
+                  Drag to turn or adjust the camera height; scroll to change its
+                  distance. It pulls closer near walls. Perspective rays fan
+                  outward and objects shrink with distance. The city drawing
+                  keeps parallel rays.
                 </p>
                 <p>
                   Street view looks down at 27°, with a closer camera with a
@@ -232,8 +246,9 @@ export default function Home() {
                 <p>
                   Imagine graph paper in front of the camera. From the center of
                   every cell, send a line into the scene:{' '}
-                  <code>P(t) = O + tD</code>. O is the cell’s starting point; D
-                  is the shared viewing direction.
+                  <code>P(t) = O + tD</code>. O is the starting point and D is
+                  the ray direction. The drawing uses parallel rays; perspective
+                  rays spread out from a shared camera position.
                 </p>
                 <p>
                   Intersect the ray with building boxes and the ground, then
@@ -307,8 +322,8 @@ export default function Home() {
         <div>
           <span className="key">W A S D</span> Walk{' '}
           <span className="key">SHIFT</span> Run{' '}
-          <span className="key">Q E</span> Orbit{' '}
-          <span className="key">SCROLL</span> Zoom
+          <span className="key">Q E</span> Turn{' '}
+          <span className="key">SCROLL</span> {pov === 'second' ? 'Camera distance' : 'Zoom'}
         </div>
         <div className="footer-actions">
           <span>

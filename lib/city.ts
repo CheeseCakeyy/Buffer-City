@@ -232,12 +232,16 @@ export class City {
   pov: 'third' | 'second' | 'first' = 'third';
   private lookPitch = 0.04;
   private fov = 72;
+  private followPitch = 0.24;
+  private followDistance = 5.5;
   private get perspective() { return this.pov === 'first' || this.pov === 'second'; }
   setPOV(pov: 'third' | 'second' | 'first') {
     this.pov = pov;
     this.overview = false;
     this.path = [];
     this.focus = [...this.player];
+    this.keys.clear();
+    this.reportAt = 0;
   }
   keys = new Set<string>();
   paused = false;
@@ -296,7 +300,10 @@ export class City {
     const dx = e.clientX - this.drag.x;
     if (this.perspective) {
       const dy = e.clientY - this.drag.y;
-      this.lookPitch = Math.max(-0.65, Math.min(this.pov === 'first' ? 1.35 : 0.65, this.lookPitch + dy * 0.004));
+      if (this.pov === 'second')
+        this.followPitch = Math.max(0.12, Math.min(0.85, this.followPitch + dy * 0.004));
+      else
+        this.lookPitch = Math.max(-0.65, Math.min(1.35, this.lookPitch + dy * 0.004));
       this.drag.y = e.clientY;
       if (Math.abs(dy) > 2) this.drag.moved = true;
     }
@@ -401,9 +408,13 @@ export class City {
     this.dpr = dpr;
   }
   rotate(n: number) {
-    this.angle += (n * Math.PI) / 8;
+    this.angle -= (n * Math.PI) / 8;
   }
   zoomBy(n: number) {
+    if (this.pov === 'second') {
+      this.followDistance = Math.max(2.5, Math.min(9, (this.followDistance ?? 5.5) * n));
+      return;
+    }
     if (this.perspective) {
       this.fov = Math.max(45, Math.min(100, this.fov * n));
       return;
@@ -417,11 +428,21 @@ export class City {
     this.overview = false;
     this.path = [];
     this.focus = [0, 0, 15];
+    this.restoreLens();
+    this.keys.clear();
   }
   recenter() {
     this.focus = [...this.player];
     this.span = 45;
     this.overview = false;
+    this.restoreLens();
+  }
+  private restoreLens() {
+    this.lookPitch = 0.04;
+    this.fov = 72;
+    this.followPitch = 0.24;
+    this.followDistance = 5.5;
+    this.reportAt = 0;
   }
   toggleNight() {
     this.clock = this.clock >= 1080 || this.clock < 360 ? 540 : 1260;
@@ -470,21 +491,27 @@ export class City {
   };
   private camera() {
     if (this.perspective) {
-      const yaw = this.angle + (this.pov === 'second' ? Math.PI : 0);
+      const yaw = this.angle;
       const c = Math.cos(yaw), s = Math.sin(yaw);
-      const e = this.pov === 'second' ? 0.12 : this.lookPitch;
+      const e = this.pov === 'second' ? (this.followPitch ?? 0.24) : this.lookPitch;
       this.right = [c, 0, -s];
       this.up = [-s * Math.sin(e), Math.cos(e), -c * Math.sin(e)];
       this.direction = [-s * Math.cos(e), -Math.sin(e), -c * Math.cos(e)];
       this.center = [this.player[0], 1.65, this.player[2]];
       if (this.pov === 'second') {
-        const toward: Vec = [-Math.sin(this.angle), 0.12, -Math.cos(this.angle)];
-        let distance = 5;
+        // A raised boom behind the player looks along their heading. Both
+        // movement and camera therefore use the same forward/right basis.
+        this.center = [this.player[0], 1.1, this.player[2]];
+        const behind: Vec = this.direction.map(v => -v) as Vec;
+        let distance = this.followDistance ?? 5.5;
         for (const b of this.fixed) {
-          const hit = intersectBox(this.center, toward, b);
-          if (hit) distance = Math.min(distance, Math.max(0.35, hit.t - 0.3));
+          const padded: Box = { ...b,
+            min: b.min.map(v => v - 0.18) as Vec,
+            max: b.max.map(v => v + 0.18) as Vec };
+          const hit = intersectBox(this.center, behind, padded);
+          if (hit) distance = Math.min(distance, Math.max(0.12, hit.t - 0.08));
         }
-        this.center = this.center.map((v, i) => v + toward[i] * distance) as Vec;
+        this.center = this.center.map((v, i) => v + behind[i] * distance) as Vec;
       }
       return;
     }
@@ -509,6 +536,7 @@ export class City {
     );
   }
   private viewCenterY() {
+    if (this.pov === 'second') return this.height * (this.width < 700 ? 0.52 : 0.58);
     if (this.perspective) return this.height / 2;
     return this.height * (this.width < 700 ? 0.51 : 0.6);
   }
@@ -528,13 +556,13 @@ export class City {
   private rayDirection(px: number, py: number): Vec {
     if (!this.perspective) return this.direction;
     const u = (px - this.width / 2) / this.focalLength();
-    const v = (this.height / 2 - py) / this.focalLength();
+    const v = (this.viewCenterY() - py) / this.focalLength();
     return this.direction.map((d, i) => d + this.right[i] * u + this.up[i] * v) as Vec;
   }
   private buildRowBounds() {
     this.rowBounds = Array.from({ length: this.rows }, () => []);
     for (const box of this.objects) {
-      if (this.hiddenInFirstPerson(box)) continue;
+      if (this.hiddenFromCamera(box)) continue;
       const corners: Vec[] = [];
       for (const x of [box.min[0], box.max[0]])
         for (const y of [box.min[1], box.max[1]])
@@ -594,7 +622,7 @@ export class City {
       }
     } else {
       for (const b of this.objects) {
-        if (this.hiddenInFirstPerson(b)) continue;
+        if (this.hiddenFromCamera(b)) continue;
         const hit = intersectBox(o, d, b);
         if (hit && (!nearest || hit.t < nearest.t)) nearest = hit;
       }
@@ -602,10 +630,15 @@ export class City {
     return nearest;
   }
 
-  private hiddenInFirstPerson(b: Box) {
+  private hiddenFromCamera(b: Box) {
+    if (b.kind !== 'player') return false;
+    // When a wall pushes the boom into the avatar, suppress the model instead
+    // of letting the inside of the jacket fill the screen. It returns in space.
+    if (this.pov === 'second')
+      return Math.hypot(this.center[0] - this.player[0], this.center[2] - this.player[2]) < 0.75;
     // Hide only parts surrounding the eye; looking down still reveals your
     // jacket sleeves, hands, trousers and shoes in world space.
-    return this.pov === 'first' && b.kind === 'player' &&
+    return this.pov === 'first' &&
       !['shoe', 'trousers'].includes(b.finish || '') &&
       b.feature !== 'sleeve' && b.feature !== 'hand';
   }
@@ -657,7 +690,7 @@ export class City {
       Number(this.keys.has('s') || this.keys.has('arrowdown')) -
       Number(this.keys.has('w') || this.keys.has('arrowup'));
     this.angle +=
-      (Number(this.keys.has('e')) - Number(this.keys.has('q'))) * dt * 1.2;
+      (Number(this.keys.has('q')) - Number(this.keys.has('e'))) * dt * 1.2;
     const len = Math.hypot(dx, dz);
     if (len) this.path = [];
     if (!len && this.path.length) {
