@@ -159,8 +159,10 @@ a road or another building behind it.
 Before casting rays, `buildRowBounds()` projects all eight corners of each box
 to find its screen rectangle. In perspective views, edges crossing the camera's
 near plane are clipped before computing those bounds. The box is assigned only to rows it can cover.
-Each ray then tests boxes whose projected bounds include its cell. This reduces
-work without intentionally changing the visibility result.
+Each ray then tests boxes whose projected bounds include its cell. Candidates
+are ordered by their nearest possible depth; once that depth is beyond the
+closest hit, the remaining candidates cannot be visible. Original object order
+breaks equal-distance ties. This reduces work without changing visibility.
 
 This is CPU raycasting. It is not the one-ray-per-column method used by early
 first-person games, and it does not use a GPU 3D library, triangle
@@ -249,12 +251,28 @@ of offscreen samples.
 
 Surface glyphs, details, and labels compete through a priority array. `stamp()`
 keeps the higher-priority character for a cell. At the end of the frame,
-`render()` calls Canvas 2D's `fillText()` once for every non-empty cell. The
+`render()` uses [`lib/glyph-atlas.ts`](lib/glyph-atlas.ts) to rasterize each
+character/color combination once onto a small offscreen canvas. Each non-empty
+cell then copies its cached glyph with `drawImage()`. This preserves the font,
+color, character spacing and detail while avoiding thousands of repeated text
+rasterizations. The cache is rebuilt when the canvas display density changes. The
 player's `@` marker is drawn afterward so it remains easy to find through
 buildings.
 
 The renderer is therefore a hybrid: raycasting determines solid visible
 surfaces, and projection adds line-based detail into the same character grid.
+
+Camera projection constants are calculated once per frame, and the cell loop
+reuses ray and hit-position vectors. Model rotations cache their sine and cosine;
+box intersection avoids temporary arrays for misses. These optimizations are
+especially useful in first-person and follow views, where surfaces cover many
+more character cells.
+
+`node benchmark.mjs` profiles three scenes in all three views at 1600×900. It
+counts canvas commands and measures CPU work with drawing stubbed, so its frame
+times are not browser FPS. Pass an output JSON path to save results; `--reference`
+compares against source from Git HEAD. The saved glyph/color hash can be compared
+between runs to check that performance changes preserve the displayed content.
 
 ## 8. Why the image stays relatively stable during movement
 
