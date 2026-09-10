@@ -3,6 +3,8 @@ import { benchModel, doorModels, vehicleModel } from './street-details';
 
 export const BLOCK_SIZE = 42;
 export const WORLD_LIMIT = 66;
+export const RIVER = { west: -66, east: 66, north: 66, south: 76, surface: .12, bottom: -22 };
+export const MAP_LIMIT = 80;
 export type District = {
   id: string; name: string; identity: string; code: string;
   x: number; z: number; color: string; description: string;
@@ -155,5 +157,18 @@ export function generateWorld(maple: Box[]): CityWorld {
     prop(2.9, 16.5, .12, .12, 3, `${d.name} wayfinding post`, 'metal');
     scene.coarse.push({ min: [d.x + 2.6, 2, d.z + 16.6], max: [d.x + 3.3, 3.6, d.z + 16.8], name: d.code, kind: 'sign', detail: `${d.name}: ${d.description}` });
   }
+  // The river occupies a new waterfront outside the existing street grid.
+  // Its open eastern lip meets a falling sheet, with no retaining wall across it.
+  world.blocks[0].coarse.push(
+    { min: [-66, -12, -66], max: [66, -.06, 76], name: 'City escarpment', kind: 'cliff',
+      detail: 'Layers of stone beneath the city and its riverside.' },
+    { min: [RIVER.west, 0, RIVER.north], max: [RIVER.east, RIVER.surface, RIVER.south],
+      name: 'Skyline River', kind: 'river', detail: 'An eastward current follows the southern waterfront, then spills over the city edge.' },
+    { min: [RIVER.east, RIVER.bottom, RIVER.north], max: [RIVER.east + .45, RIVER.surface, RIVER.south],
+      name: 'Infinity Falls', kind: 'waterfall', detail: 'The river slips over an open stone lip and falls into the mist below.' },
+    { min: [-66, 0, 65.65], max: [66, .32, 66], name: 'River embankment', kind: 'prop', finish: 'paint', tint: '#919c90' },
+    { min: [-66, 0, 76], max: [66, .25, 76.35], name: 'Outer riverbank', kind: 'prop', finish: 'paint', tint: '#919c90' },
+    { min: [-66.3, 0, 66], max: [-66, .25, 76.35], name: 'River headwall', kind: 'prop', finish: 'paint', tint: '#919c90' },
+  );
   return world;
 }

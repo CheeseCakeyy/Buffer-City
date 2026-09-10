@@ -1,5 +1,5 @@
 import { detailGlyph, personModel, toWorld, vehicleModel } from './street-details';
-import { DISTRICTS, WORLD_LIMIT, districtAt, districtDestination, generateWorld, roadDistance } from './city-world';
+import { DISTRICTS, WORLD_LIMIT, RIVER, MAP_LIMIT, districtAt, districtDestination, generateWorld, roadDistance } from './city-world';
 import { WalkingGrid } from './walking-grid';
 import type { Finish, Frame } from './street-details';
 import { GlyphAtlas } from './glyph-atlas';
@@ -314,7 +314,7 @@ export class City {
   setOverview() {
     this.pov = 'third';
     this.overview = !this.overview;
-    this.span = this.overview ? 195 : 45;
+    this.span = this.overview ? 220 : 45;
     this.reportAt = 0;
   }
   private pointerdown = (e: PointerEvent) => {
@@ -866,6 +866,26 @@ export class City {
     }
     if (b.kind === 'foliage')
       return [['&', '*', '#'][mod(Math.floor(p[0] * 5 + p[1] * 3 + p[2] * 4), 3)], night ? '#608c57' : '#4d844c'];
+    if (b.kind === 'river') {
+      const wave = mod(p[0] * .85 - this.elapsed * 1.8 + Math.sin(p[2] * 1.7) * .65, 4);
+      const lip = p[0] > RIVER.east - .7;
+      return [lip ? '=' : wave < .65 ? '~' : wave < 1 ? '-' : '.',
+        lip ? (night ? '#c6eee6' : '#4b939b') : wave < 1 ? (night ? '#80bfbe' : '#468d97') : (night ? '#3d747e' : '#8ab8ba')];
+    }
+    if (b.kind === 'waterfall') {
+      // Positive time advances the streak pattern downwards in world space.
+      const lane = Math.floor(p[2] * 3);
+      const streak = mod(p[1] * 1.1 + this.elapsed * 8 + Math.sin(lane * 2.3) * 3, 6);
+      const fade = (RIVER.surface - p[1]) / (RIVER.surface - RIVER.bottom);
+      const broken = fade > .65 && mod(lane * 7 + Math.floor(p[1] * 3 + this.elapsed * 8), 9) < (fade - .65) * 20;
+      return [broken ? ' ' : fade > .85 ? ':' : streak < 1.2 ? ':' : lane % 3 === 0 ? '|' : '!',
+        fade > .8 ? (night ? '#456969' : '#b2cdcb') : streak < 1.2 ? (night ? '#d0efdf' : '#73b2b8') : (night ? '#75c3c9' : '#428d9d')];
+    }
+    if (b.kind === 'cliff') {
+      const layer = mod(-p[1] + Math.sin(p[0] * .15 + p[2] * .12) * .35, 2.8);
+      return [layer < .14 ? '-' : mod(p[0] * 1.9 + p[2] * 2.3 + p[1] * .7, 5) < .35 ? ':' : '.',
+        night ? '#384d48' : '#c2c6ba'];
+    }
     if (b.kind === 'water')
       return [mod(p[0] * 2 + p[2] * 3, 2) < 1 ? '~' : '-', night ? '#547e88' : '#6d9da4'];
     if (b.kind === 'clock') return [p[1] > b.max[1] - 2.5 ? 'O' : '|', night ? '#e8c16b' : '#7b817b'];
@@ -1128,7 +1148,7 @@ export class City {
     for (const b of this.objects) {
       // Model surfaces carry their own local details. Outlining every small part
       // would fill the spaces between limbs, wheels, and bench slats with ink.
-      if (b.finish || !this.visibleObjects?.has(b) || b.kind === 'foliage') continue;
+      if (b.finish || !this.visibleObjects?.has(b) || ['foliage', 'river', 'waterfall', 'cliff'].includes(b.kind)) continue;
       if (b.kind === 'person' || b.kind === 'player') continue;
       this.outline(b, ink);
       if (b.kind === 'sign') {
@@ -1252,6 +1272,16 @@ export class City {
       this.line([x, 3.7, z], [x + .7, 3.7, z], ink);
       this.label('*', [x + .7, 3.7, z], night ? '#e3b864' : ink);
     }
+    // A small deterministic spray cloud disperses beyond the falling sheet.
+    // World-space labels use the same depth buffer as the rest of the drawing.
+    for (let i = 0; i < 48; i++) {
+      const phase = mod(this.elapsed * .35 + i * .618, 1);
+      this.label(phase < .4 ? ':' : '.', [
+        RIVER.east + .7 + phase * 4 + Math.sin(i * 2.4) * .4,
+        RIVER.bottom + 3 - phase * 4 + Math.sin(i * 1.8),
+        RIVER.north + mod(i * 2.71, 10) + Math.sin(i * 3.1) * phase * 2,
+      ], night ? '#517c7b' : '#a9c7c7');
+    }
     // Sparse route markers sit on the ground and obey the depth buffer.
     for (let i = 0; i < this.path.length; i += 6) {
       const p = this.path[i];
@@ -1283,7 +1313,7 @@ export class City {
   private drawMap(night: boolean) {
     const canvas = this.mapCanvas, ctx = canvas?.getContext('2d');
     if (!ctx || !canvas) return;
-    const size = canvas.width, scale = (size - 8) / (WORLD_LIMIT * 2), mid = size / 2;
+    const size = canvas.width, scale = (size - 8) / (MAP_LIMIT * 2), mid = size / 2;
     const px = (x: number) => mid + x * scale;
     ctx.clearRect(0, 0, size, size);
     const current = districtAt(this.player[0], this.player[2]);
@@ -1296,6 +1326,10 @@ export class City {
     ctx.fillStyle = night ? '#647160' : '#bbbcae';
     for (const b of this.fixed) ctx.fillRect(px(b.min[0]), px(b.min[2]),
       (b.max[0] - b.min[0]) * scale, (b.max[2] - b.min[2]) * scale);
+    ctx.fillStyle = night ? '#549aab' : '#78aeb6';
+    ctx.fillRect(px(RIVER.west), px(RIVER.north), (RIVER.east - RIVER.west) * scale, (RIVER.south - RIVER.north) * scale);
+    ctx.fillStyle = night ? '#b9e7e0' : '#3e818e';
+    ctx.fillRect(px(RIVER.east) - 1, px(RIVER.north), 2, (RIVER.south - RIVER.north) * scale);
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const d of DISTRICTS) {
@@ -1317,7 +1351,7 @@ export class City {
   private mapClick = (event: MouseEvent) => {
     if (!this.mapCanvas) return;
     const rect = this.mapCanvas.getBoundingClientRect();
-    const size = this.mapCanvas.width, scale = (size - 8) / (WORLD_LIMIT * 2);
+    const size = this.mapCanvas.width, scale = (size - 8) / (MAP_LIMIT * 2);
     const x = ((event.clientX - rect.left) / rect.width * size - size / 2) / scale;
     const z = ((event.clientY - rect.top) / rect.height * size - size / 2) / scale;
     this.visitDistrict(districtAt(x, z).id);

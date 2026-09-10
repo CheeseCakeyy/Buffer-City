@@ -397,6 +397,31 @@ for (const d of DISTRICTS) {
   assert.ok(p[0] > 0 && p[0] < renderer.width && p[1] > 0 && p[1] < renderer.height);
 }
 console.log('All nine districts rendered in all three views; map drawing, screen bins and overview detail budget passed.');
+// The waterfront sits outside the walking grid; its falling sheet remains a
+// real ray-traced surface below ground, including in the accelerated renderer.
+const river = renderer.objects.find(b => b.kind === 'river');
+const falls = renderer.objects.find(b => b.kind === 'waterfall');
+assert.ok(river && falls);
+assert.equal(renderer.trace([0, 10, 71], -1, -1, [0, -1, 0]).box, river);
+assert.equal(renderer.trace([80, -10, 71], -1, -1, [-1, 0, 0]).box, falls);
+assert.equal(canWalk(0, 71, renderer.fixed), false);
+for (const angle of [0, .49, 1.57, 2.8, 4, 5.5]) {
+  renderer.angle = angle; renderer.camera();
+  for (const point of [[-66, .12, 76], [66, .12, 76], [71, -24, 78]]) {
+    const p = renderer.project(point);
+    assert.ok(p[0] > 0 && p[0] < renderer.width && p[1] > 0 && p[1] < renderer.height,
+      'Whole-city framing must include the river and waterfall spray');
+  }
+}
+const waterHit = { t: 1, normal: [0, 1, 0], box: river };
+const sampleWater = () => Array.from({ length: 20 }, (_, i) => renderer.glyph(waterHit, [i, .12, 71], 0, 0, false));
+const waterBefore = sampleWater();
+renderer.paused = false; renderer.simulate(.4);
+assert.notDeepEqual(sampleWater(), waterBefore, 'The current must flow as time advances');
+const frozenWater = sampleWater();
+renderer.paused = true; renderer.simulate(.4);
+assert.deepEqual(sampleWater(), frozenWater, 'Pausing the city must freeze the current');
+console.log('River visibility, below-ground waterfall hits, overview framing and animated/paused current passed.');
 renderer.setPOV('first'); renderer.setPOV('third');
 assert.equal(renderer.overview, false);
 assert.equal(renderer.span, 45, 'Leaving the overview through the camera menu must restore the street zoom');
