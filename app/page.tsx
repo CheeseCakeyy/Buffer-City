@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { City, type CityStats } from '../lib/city';
+import { DISTRICTS } from '../lib/city-world';
 export default function Home() {
   const map = useRef<HTMLCanvasElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null),
@@ -85,9 +86,9 @@ export default function Home() {
         <div className="brand">
           <div>
             <h1>
-              ascii city<span> / maple street</span>
+              ascii city<span> / nine blocks</span>
             </h1>
-            <p>An inhabited drawing.</p>
+            <p>Nine neighborhoods. One inhabited drawing.</p>
           </div>
         </div>
         <div className="header-right">
@@ -104,6 +105,17 @@ export default function Home() {
 
         <div className="clock">
           <strong>{stats.time}</strong>
+        </div>
+        <div className="district-navigation">
+          <span className="eyebrow">{stats.identity ?? 'Mixed use'} · 3 × 3 CITY</span>
+          <strong>{stats.district ?? 'Maple Street'}</strong>
+          <select aria-label="Walk to a neighborhood" value="" onChange={e => {
+            engine.current?.visitDistrict(e.target.value);
+            canvas.current?.focus({ preventScroll: true });
+          }}>
+            <option value="" disabled>Walk to a neighborhood…</option>
+            {DISTRICTS.map(d => <option key={d.id} value={d.id}>{d.code} · {d.name} / {d.identity}</option>)}
+          </select>
         </div>
         <div className="legend" id="camera-hint">
           {cameraHint}
@@ -126,7 +138,7 @@ export default function Home() {
               engine.current?.setOverview();
             }}
           >
-            {overview ? 'Street drawing' : 'Whole block'}
+            {overview ? 'Street drawing' : 'Whole city'}
           </button>
           <button
             aria-label="Rotate left"
@@ -162,14 +174,15 @@ export default function Home() {
         </div>
         <div className="neighborhood-map">
           <span>
-            MAPLE STREET <span> N ↑</span>
+            CITY MAP <span> N ↑</span>
           </span>
           <canvas
             ref={map}
-            width={136}
-            height={136}
-            aria-label="Neighborhood map showing your location, heading and walking route"
+            width={180}
+            height={180}
+            aria-label="City map. Click a block to walk there, or use the neighborhood selector. Your position and walking route are highlighted."
           />
+          <small>Click a block to walk there</small>
         </div>
         <div className="inspection">
           <p>{stats.selected}</p>
@@ -215,7 +228,8 @@ export default function Home() {
               <li>
                 <h3>01 / Simulate the world</h3>
                 <p>
-                  Buildings are boxes with width, depth and height. Your
+                  Nine distinct blocks share a street grid. Buildings and props
+                  are boxes with width, depth and height. Your
                   position changes with input; cars and residents follow looping
                   routes. A clock controls daylight. These are simple routines,
                   not a full economy or traffic model.
@@ -235,10 +249,11 @@ export default function Home() {
                 <p>
                   Street view looks down at 27°, with a closer camera with a
                   three-unit dead zone. Small movements leave the drawing still;
-                  walking farther brings the camera along. Whole block switches
+                  walking farther brings the camera along. Whole city switches
                   to a 35.3° overview. Parallel rays keep far buildings the same
                   size as near ones. Q / E rotates the view; zoom changes the
-                  area each cell covers.
+                  area each cell covers. Choose a neighborhood or click its map
+                  tile to follow a walking route; WASD takes over at any time.
                 </p>
               </li>
               <li>

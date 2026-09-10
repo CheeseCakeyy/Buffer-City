@@ -1,4 +1,6 @@
-import { benchModel, detailGlyph, doorModels, personModel, toWorld, vehicleModel } from './street-details';
+import { detailGlyph, personModel, toWorld, vehicleModel } from './street-details';
+import { DISTRICTS, WORLD_LIMIT, districtAt, districtDestination, generateWorld, roadDistance } from './city-world';
+import { WalkingGrid } from './walking-grid';
 import type { Finish, Frame } from './street-details';
 import { GlyphAtlas } from './glyph-atlas';
 
@@ -15,6 +17,7 @@ export type Box = {
   feature?: string;
 };
 export type Hit = { t: number; normal: Vec; box: Box | null };
+type ScreenBound = { box: Box; left: number; right: number; near: number; index: number };
 export type CityStats = {
   time: string;
   fps: number;
@@ -22,6 +25,8 @@ export type CityStats = {
   overview?: boolean;
   pov?: 'third' | 'second' | 'first';
   selected: string;
+  district?: string;
+  identity?: string;
 };
 const dot = (a: Vec, b: Vec) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const mod = (n: number, m: number) => ((n % m) + m) % m;
@@ -110,8 +115,8 @@ export function intersectBox(o: Vec, d: Vec, b: Box): Hit | null {
 }
 export function canWalk(x: number, z: number, boxes: Box[]) {
   return (
-    Math.abs(x) < 25 &&
-    Math.abs(z) < 25 &&
+    Math.abs(x) < WORLD_LIMIT - 1 &&
+    Math.abs(z) < WORLD_LIMIT - 1 &&
     !boxes.some(
       (b) =>
         b.min[1] < 1.6 &&
@@ -134,7 +139,7 @@ function box(
 ): Box {
   return { min: [x, 0, z], max: [x + w, h, z + d], name, kind, detail };
 }
-export function buildings(): Box[] {
+function mapleBuildings(): Box[] {
   return [
     box(
       -16,
@@ -238,6 +243,10 @@ export function buildings(): Box[] {
     ),
   ];
 }
+let worldCache: ReturnType<typeof generateWorld> | undefined;
+export function cityWorld() { return worldCache ??= generateWorld(mapleBuildings()); }
+export function buildings(): Box[] { return cityWorld().colliders; }
+
 export class City {
   pov: 'third' | 'second' | 'first' = 'third';
   private lookPitch = 0.04;
@@ -247,6 +256,7 @@ export class City {
   private get perspective() { return this.pov === 'first' || this.pov === 'second'; }
   setPOV(pov: 'third' | 'second' | 'first') {
     this.pov = pov;
+    if (this.overview) this.span = 45;
     this.overview = false;
     this.path = [];
     this.focus = [...this.player];
@@ -273,7 +283,9 @@ export class City {
   private clock = 540;
   private elapsed = 0;
   private gait = 0;
-  private streetFurniture: Box[] | undefined;
+  private walkingGrid: WalkingGrid | undefined;
+  private visibleObjects = new Set<Box>();
+  private detailedBuildings = new Set<Box>();
   private fixed = buildings();
   private objects: Box[] = [];
   private selected = 'Click a building to inspect it.';
@@ -294,14 +306,16 @@ export class City {
   private projectionCenterY = 0;
   private lastPointerUpMoved = false;
   private mapCanvas: HTMLCanvasElement | null = null;
-  private rowBounds: Array<Array<{ box: Box; left: number; right: number; near: number; index: number }>> =
-    [];
+  private rowBounds: ScreenBound[][] = [];
+  private rayBins: ScreenBound[][] = [];
+  private binColumns = 0;
 
   overview = false;
   setOverview() {
     this.pov = 'third';
     this.overview = !this.overview;
-    this.span = this.overview ? 72 : 45;
+    this.span = this.overview ? 195 : 45;
+    this.reportAt = 0;
   }
   private pointerdown = (e: PointerEvent) => {
     this.canvas.setPointerCapture(e.pointerId);
@@ -331,52 +345,25 @@ export class City {
     this.drag = null;
   };
   private walkTo(x: number, z: number) {
-    const step = 0.5,
-      start = [
-        Math.round(this.player[0] / step),
-        Math.round(this.player[2] / step),
-      ],
-      end = [Math.round(x / step), Math.round(z / step)];
-    if (!canWalk(end[0] * step, end[1] * step, this.fixed)) return false;
-    const key = (a: number, b: number) => a + ',' + b,
-      queue = [start],
-      seen = new Map<string, number[] | null>([
-        [key(...(start as [number, number])), null],
-      ]);
-    let head = 0,
-      found = false;
-    while (head < queue.length) {
-      const c = queue[head++];
-      if (c[0] === end[0] && c[1] === end[1]) {
-        found = true;
-        break;
-      }
-      for (const [dx, dz] of [
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1],
-      ]) {
-        const a = c[0] + dx,
-          b = c[1] + dz,
-          k = key(a, b);
-        if (!seen.has(k) && canWalk(a * step, b * step, this.fixed)) {
-          seen.set(k, c);
-          queue.push([a, b]);
-        }
-      }
-    }
-    if (found) {
-      const route: Vec[] = [];
-      let c: number[] | null = end;
-      while (c && (c[0] !== start[0] || c[1] !== start[1])) {
-        route.push([c[0] * step, 0, c[1] * step]);
-        c = seen.get(key(c[0], c[1])) || null;
-      }
-      this.path = route.reverse();
-      return true;
-    }
-    return false;
+    if (!this.walkingGrid || this.walkingGrid.boxes !== this.fixed)
+      this.walkingGrid = new WalkingGrid(this.fixed);
+    const route = this.walkingGrid.route(this.player, x, z);
+    if (route === null) return false;
+    this.path = route;
+    return true;
+  }
+  visitDistrict(id: string) {
+    const district = DISTRICTS.find(d => d.id === id);
+    if (!district) return false;
+    const target = districtDestination(district);
+    const started = this.walkTo(target[0], target[2]);
+    this.selected = started
+      ? this.path.length
+        ? `Walking to ${district.name} · ${district.identity}. WASD takes over at any time.`
+        : `At the entrance to ${district.name} · ${district.identity}.`
+      : 'No clear route from here. Move onto the sidewalk and try again.';
+    this.reportAt = 0;
+    return started;
   }
 
   private right: Vec = [0, 0, 0];
@@ -433,7 +420,7 @@ export class City {
       this.fov = Math.max(45, Math.min(100, this.fov * n));
       return;
     }
-    this.span = Math.max(28, Math.min(100, this.span * n));
+    this.span = Math.max(28, Math.min(240, this.span * n));
   }
   reset() {
     this.player = [0, 0, 18];
@@ -538,9 +525,9 @@ export class City {
     this.up = [-s * Math.sin(e), Math.cos(e), -c * Math.sin(e)];
     this.direction = [-s * Math.cos(e), -Math.sin(e), -c * Math.cos(e)];
     this.center = [
-      (this.overview ? 0 : this.focus[0]) - this.direction[0] * 75,
-      2 - this.direction[1] * 75,
-      (this.overview ? 0 : this.focus[2]) - this.direction[2] * 75,
+      (this.overview ? 0 : this.focus[0]) - this.direction[0] * 180,
+      2 - this.direction[1] * 180,
+      (this.overview ? 0 : this.focus[2]) - this.direction[2] * 180,
     ];
   }
   private viewScale() {
@@ -553,7 +540,7 @@ export class City {
   }
   private viewCenterY() {
     if (this.pov === 'second') return this.height * (this.width < 700 ? 0.52 : 0.58);
-    if (this.perspective) return this.height / 2;
+    if (this.perspective || this.overview) return this.height / 2;
     return this.height * (this.width < 700 ? 0.51 : 0.6);
   }
   private ray(px: number, py: number): Vec {
@@ -579,9 +566,30 @@ export class City {
   }
   private buildRowBounds() {
     this.rowBounds = Array.from({ length: this.rows }, () => []);
+    this.binColumns = Math.ceil(this.columns / 16);
+    this.rayBins = Array.from({ length: this.rows * this.binColumns }, () => []);
+    this.visibleObjects ??= new Set<Box>();
+    this.visibleObjects.clear();
     for (let index = 0; index < this.objects.length; index++) {
       const box = this.objects[index];
       if (this.hiddenFromCamera(box)) continue;
+      // A conservative sphere rejects off-screen models before allocating and
+      // projecting eight corners. Near-plane clipping below remains exact.
+      const middle = toWorld([(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2,
+        (box.min[2] + box.max[2]) / 2], box.frame);
+      const radius = Math.hypot(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]) / 2;
+      const cx = middle[0] - this.center[0], cy = middle[1] - this.center[1], cz = middle[2] - this.center[2];
+      const depth = cx * this.direction[0] + cy * this.direction[1] + cz * this.direction[2];
+      const horizontal = cx * this.right[0] + cz * this.right[2];
+      const vertical = cx * this.up[0] + cy * this.up[1] + cz * this.up[2];
+      const sx = (this.width / 2 + this.cw * 2) / this.projectionScale;
+      const top = (this.projectionCenterY + this.ch * 2) / this.projectionScale;
+      const bottom = (this.height - this.projectionCenterY + this.ch * 2) / this.projectionScale;
+      if (this.perspective) {
+        if (depth + radius < .08 || Math.abs(horizontal) - depth * sx > radius * Math.hypot(1, sx) ||
+          vertical - depth * top > radius * Math.hypot(1, top) ||
+          -vertical - depth * bottom > radius * Math.hypot(1, bottom)) continue;
+      } else if (Math.abs(horizontal) > sx + radius || vertical > top + radius || -vertical > bottom + radius) continue;
       const corners: Vec[] = [];
       for (const x of [box.min[0], box.max[0]])
         for (const y of [box.min[1], box.max[1]])
@@ -602,15 +610,16 @@ export class City {
       if (!points.length) continue;
       let left = Infinity,
         right = -Infinity,
-        top = Infinity,
-        bottom = -Infinity;
+        screenTop = Infinity,
+        screenBottom = -Infinity;
       for (const p of points) {
             left = Math.min(left, p[0]);
             right = Math.max(right, p[0]);
-            top = Math.min(top, p[1]);
-            bottom = Math.max(bottom, p[1]);
+            screenTop = Math.min(screenTop, p[1]);
+            screenBottom = Math.max(screenBottom, p[1]);
           }
-      if (right < -this.cw || left > this.width + this.cw || bottom < -this.ch || top > this.height + this.ch) continue;
+      if (right < -this.cw || left > this.width + this.cw || screenBottom < -this.ch || screenTop > this.height + this.ch) continue;
+      this.visibleObjects.add(box);
       const entry = {
         box,
         index,
@@ -618,14 +627,22 @@ export class City {
         left: Math.floor((left - this.gridX) / this.cw) - 1,
         right: Math.ceil((right - this.gridX) / this.cw) + 1,
       };
-      const a = Math.max(0, Math.floor((top - this.gridY) / this.ch) - 1),
+      const a = Math.max(0, Math.floor((screenTop - this.gridY) / this.ch) - 1),
         b = Math.min(
           this.rows - 1,
-          Math.ceil((bottom - this.gridY) / this.ch) + 1,
+          Math.ceil((screenBottom - this.gridY) / this.ch) + 1,
         );
       for (let row = a; row <= b; row++) this.rowBounds[row].push(entry);
     }
-    for (const row of this.rowBounds) row.sort((a, b) => a.near - b.near || a.index - b.index);
+    for (let r = 0; r < this.rows; r++) {
+      const row = this.rowBounds[r];
+      row.sort((a, b) => a.near - b.near || a.index - b.index);
+      for (const entry of row) {
+        const left = Math.max(0, Math.floor(entry.left / 16));
+        const right = Math.min(this.binColumns - 1, Math.floor(entry.right / 16));
+        for (let b = left; b <= right; b++) this.rayBins[r * this.binColumns + b].push(entry);
+      }
+    }
   }
   private trace(o: Vec, col = -1, row = -1, d: Vec = this.direction): Hit | null {
     let nearest: Hit | null = null;
@@ -634,11 +651,11 @@ export class City {
     if (t >= 0) {
       const x = o[0] + t * d[0],
         z = o[2] + t * d[2];
-      if (Math.abs(x) < 26 && Math.abs(z) < 26)
+      if (Math.abs(x) < WORLD_LIMIT && Math.abs(z) < WORLD_LIMIT)
         nearest = { t, normal: [0, 1, 0], box: null };
     }
     if (row >= 0) {
-      for (const entry of this.rowBounds[row]) {
+      for (const entry of this.rayBins[row * this.binColumns + Math.floor(col / 16)]) {
         if (nearest && entry.near > nearest.t + 1e-8) break;
         if (col < entry.left || col > entry.right) continue;
         const hit = intersectBox(o, d, entry.box);
@@ -764,67 +781,43 @@ export class City {
       this.focus[0] += fx * amount;
       this.focus[2] += fz * amount;
     }
-    this.objects = [...this.fixed];
-    for (let i = 0; i < this.fixed.length; i++) {
-      const b = this.fixed[i],
-        x = b.min[0] + 1.2,
-        z = b.min[2] + 1.3,
-        y = b.max[1];
-      if (i % 3 === 0)
-        this.objects.push({
-          min: [x, y, z],
-          max: [x + 2.5, y + 0.7, z + 1.2],
-          name: b.name,
-          kind: 'roof',
-          detail: b.detail,
-        });
-      if (i === 2 || i === 4 || i === 6) {
-        const Z = b.max[2];
-        this.objects.push({
-          min: [b.min[0] + 0.3, 2, Z],
-          max: [b.max[0] - 0.3, 2.45, Z + 0.9],
-          name: b.name,
-          kind: 'awning',
-          detail: b.detail,
-        });
+    this.objects = [];
+    this.detailedBuildings ??= new Set<Box>();
+    this.detailedBuildings.clear();
+    const near = (x: number, z: number, radius: number) =>
+      !this.overview && (x - this.player[0]) ** 2 + (z - this.player[2]) ** 2 < radius * radius;
+    for (const scene of cityWorld().blocks) {
+      // Large forms stay visible across the entire city, including distant skylines.
+      this.objects.push(...scene.coarse);
+      for (const b of scene.coarse)
+        if (b.kind === 'building' && near((b.min[0] + b.max[0]) / 2, (b.min[2] + b.max[2]) / 2, 36))
+          this.detailedBuildings.add(b);
+      for (const group of scene.details)
+        if (near(group.x, group.z, 32)) this.objects.push(...group.boxes);
+      const district = scene.district;
+      const index = DISTRICTS.indexOf(district);
+      // Each perimeter uses the inner lane of shared roads. Neighboring loops
+      // therefore travel in the opposite lane, instead of through each other.
+      for (let i = 0; i < 3; i++) {
+        const t = this.elapsed * 3 + i * (20.2 * 8 / 3) + index * 7;
+        const [rx, rz] = this.route(t, 20.2), [nx, nz] = this.route(t + .01, 20.2);
+        const x = district.x + rx, z = district.z + rz;
+        const yaw = Math.atan2(-(nx - rx), -(nz - rz)), bus = i === 0 && index % 2 === 0;
+        if (near(x, z, 28)) this.objects.push(...vehicleModel(x, z, yaw, bus, i + index));
+        else {
+          const frame = { origin: [x, 0, z] as Vec, yaw, cos: Math.cos(yaw), sin: Math.sin(yaw) };
+          this.objects.push({ min: [-.65, .25, bus ? -2.5 : -1.35], max: [.65, bus ? 2 : 1.2, bus ? 2.5 : 1.35],
+            frame, name: bus ? 'City bus' : 'Car', kind: 'car', finish: 'paint', tint: bus ? '#9c936d' : '#77897d' });
+        }
       }
-    }
-    for (const [i, text] of [
-      [0, 'MAPLE'],
-      [2, 'CAFE'],
-      [4, 'RADIO'],
-      [5, 'HOTEL'],
-      [6, 'RECORDS'],
-    ] as [number, string][]) {
-      const b = this.fixed[i],
-        h = Math.min(b.max[1] - 0.3, 2.4 + text.length * 0.6);
-      this.objects.push({
-        min: [b.max[0], 2.0, b.max[2] + 0.2],
-        max: [b.max[0] + 0.9, h, b.max[2] + 0.45],
-        name: text,
-        kind: 'sign',
-        detail: b.detail,
-      });
-    }
-    if (!this.streetFurniture) {
-      this.streetFurniture = this.fixed.flatMap(doorModels);
-      for (const [x, z] of [[-6, 12.5], [2, 12], [-17, 1]])
-        this.streetFurniture.push(...benchModel(x, z));
-      for (let i = 0; i < 3; i++)
-        this.streetFurniture.push(...vehicleModel(-10.7 + i * 4, 23.575, -Math.PI / 2, false, i, true));
-    }
-    this.objects.push(...this.streetFurniture);
-    for (let i = 0; i < 6; i++) {
-      const t = this.elapsed * 3 + i * 28;
-      const [x, z] = this.route(t, 21);
-      const [nx, nz] = this.route(t + 0.01, 21);
-      this.objects.push(...vehicleModel(x, z, Math.atan2(-(nx - x), -(nz - z)), i === 0, i));
-    }
-    for (let i = 0; i < 12; i++) {
-      const t = this.elapsed * 0.8 + i * 13;
-      const [x, z] = this.route(t, 18);
-      const [nx, nz] = this.route(t + 0.01, 18);
-      this.objects.push(...personModel(x, z, Math.atan2(-(nx - x), -(nz - z)), this.elapsed * 5 + i, 0.14, i));
+      const count = district.id === 'market' ? 12 : district.id === 'park' ? 10 : 6;
+      for (let i = 0; i < count; i++) {
+        const t = this.elapsed * .8 + i * (18 * 8 / count) + index * 3;
+        const [rx, rz] = this.route(t, 18), [nx, nz] = this.route(t + .01, 18);
+        const x = district.x + rx, z = district.z + rz;
+        if (near(x, z, 26)) this.objects.push(...personModel(x, z, Math.atan2(-(nx - rx), -(nz - rz)), this.elapsed * 5 + i, .14, i + index));
+        else if (!this.overview) this.objects.push({ min: [x - .17, 0, z - .17], max: [x + .17, 1.7, z + .17], name: 'Pedestrian', kind: 'person' });
+      }
     }
     const walked = Math.hypot(this.player[0] - beforeX, this.player[2] - beforeZ);
     this.gait = (this.gait ?? 0) + walked * 6;
@@ -842,7 +835,7 @@ export class City {
     let color = night ? '#a7b2a0' : '#41433e',
       glyph = '.';
     if (this.mode === 'depth') {
-      const v = Math.max(30, Math.min(210, Math.round((hit.t - 35) * 2.4)));
+      const v = Math.max(30, Math.min(210, Math.round(this.perspective ? hit.t * 4 : (hit.t - 110) * 1.4)));
       return ['#', `rgb(${v},${v},${v})`];
     }
     if (this.mode === 'normals')
@@ -851,28 +844,33 @@ export class City {
         n[1] ? '#63865a' : n[0] ? '#b36850' : '#557aa2',
       ];
     if (!b) {
-      const x = Math.abs(p[0]),
-        z = Math.abs(p[2]);
-      const road =
-        x < 2.4 || z < 2.4 || (x > 19 && x < 23) || (z > 19 && z < 23);
-      if (road) {
+      const rx = roadDistance(p[0]), rz = roadDistance(p[2]);
+      if (rx < 2.4 || rz < 2.4) {
         glyph = ' ';
-        if (
-          ((x < 0.12 || Math.abs(x - 21) < 0.12) && mod(p[2], 3) < 1.6) ||
-          ((z < 0.12 || Math.abs(z - 21) < 0.12) && mod(p[0], 3) < 1.6)
-        )
-          glyph = '-';
-        if ((x < 2.4 && z > 16 && z < 18) || (z < 2.4 && x > 16 && x < 18))
-          glyph = mod(x < 2.4 ? p[0] : p[2], 0.8) < 0.38 ? '=' : ' ';
-      } else if (x > 24 || z > 24) {
-        glyph = mod(p[0] + p[2], 1) < 0.16 ? '.' : ' ';
-        color = night ? '#53664e' : '#aeb69c';
-      } else {
-        glyph = mod(p[0], 1) < 0.09 || mod(p[2], 1) < 0.09 ? '+' : '.';
-        color = night ? '#52614e' : '#b6baa7';
+        if ((rx < .12 && rz > 3 && mod(p[2], 3) < 1.6) ||
+            (rz < .12 && rx > 3 && mod(p[0], 3) < 1.6)) glyph = '-';
+        if ((rx < 2.4 && rz > 3 && rz < 4.5) || (rz < 2.4 && rx > 3 && rx < 4.5))
+          glyph = mod(rx < 2.4 ? p[0] : p[2], .8) < .38 ? '=' : ' ';
+        return [glyph, night ? '#697567' : '#999a8d'];
       }
-      return [glyph, color];
+      const district = districtAt(p[0], p[2]);
+      const x = p[0] - district.x, z = p[2] - district.z;
+      const garden = district.id === 'park' || district.id === 'garden';
+      if (garden && rx > 4 && rz > 4 && Math.abs(x - z) > 1.1 && Math.abs(x + z) > 1.1) {
+        return [mod(p[0] * 3 + p[2] * 1.7, 1) < .26 ? "'" : '.', night ? '#536d50' : '#90a57b'];
+      }
+      if (district.id === 'foundry' && rx > 4 && rz > 4)
+        return [mod(Math.floor(p[0] * 3) + Math.floor(p[2] * 2), 4) === 0 ? ':' : '.', night ? '#75694b' : '#b4a17c'];
+      glyph = mod(p[0], 1) < .09 || mod(p[2], 1) < .09 ? '+' : '.';
+      return [glyph, night ? '#52614e' : '#b6baa7'];
     }
+    if (b.kind === 'foliage')
+      return [['&', '*', '#'][mod(Math.floor(p[0] * 5 + p[1] * 3 + p[2] * 4), 3)], night ? '#608c57' : '#4d844c'];
+    if (b.kind === 'water')
+      return [mod(p[0] * 2 + p[2] * 3, 2) < 1 ? '~' : '-', night ? '#547e88' : '#6d9da4'];
+    if (b.kind === 'clock') return [p[1] > b.max[1] - 2.5 ? 'O' : '|', night ? '#e8c16b' : '#7b817b'];
+    if (b.feature === 'hazard')
+      return [mod(p[0] * 2 + p[1] * 2, 2) < 1 ? '/' : '#', night ? '#c7ac5f' : '#a18334'];
     if (b.finish) return detailGlyph(b, p, n, night);
     if (b.kind === 'player') return [this.pov === 'second' ? (p[1] > 1.3 ? 'o' : '|') : ' ', night ? '#ffc66a' : '#b16b1e'];
     if (b.kind === 'person')
@@ -932,6 +930,7 @@ export class City {
         glyph =
           mod(Math.floor(u * 3) + Math.floor(p[1] * 3), 3) === 0 ? '.' : ' ';
     }
+    if (b.tint && !night && n[1] === 0 && glyph !== '#') color = b.tint;
     if (b.name === this.selectedName) color = night ? '#e1b870' : '#9b642d';
     return [glyph, color];
   }
@@ -1095,7 +1094,7 @@ export class City {
   private drawShopSigns(night: boolean) {
     const ctx = this.ctx;
     for (const b of this.objects) {
-      if (b.kind !== 'sign') continue;
+      if (b.kind !== 'sign' || !this.visibleObjects?.has(b)) continue;
       const top = this.project([(b.min[0] + b.max[0]) / 2, b.max[1] - 0.2, b.max[2] + 0.06]);
       const bottom = this.project([(b.min[0] + b.max[0]) / 2, b.min[1] + 0.15, b.max[2] + 0.06]);
       if (top[2] < 0.08 || bottom[2] < 0.08) continue;
@@ -1129,7 +1128,7 @@ export class City {
     for (const b of this.objects) {
       // Model surfaces carry their own local details. Outlining every small part
       // would fill the spaces between limbs, wheels, and bench slats with ink.
-      if (b.finish) continue;
+      if (b.finish || !this.visibleObjects?.has(b) || b.kind === 'foliage') continue;
       if (b.kind === 'person' || b.kind === 'player') continue;
       this.outline(b, ink);
       if (b.kind === 'sign') {
@@ -1175,7 +1174,7 @@ export class City {
         }
         continue;
       }
-      if (b.kind !== 'building') continue;
+      if (b.kind !== 'building' || !this.detailedBuildings?.has(b)) continue;
       const [x, , z] = b.min,
         [X, h, Z] = b.max;
       // Window frames on all four façades, tested against the ray depth buffer.
@@ -1241,56 +1240,23 @@ export class City {
           );
       }
     }
-    // Paved sidewalk edges, curb joints and crossing stripes.
-    for (const a of [-19, -17, -2.7, 2.7, 17, 19]) {
-      this.line([a, 0.02, -24], [a, 0.02, 24], faint);
-      this.line([-24, 0.02, a], [24, 0.02, a], faint);
+    // Shared curbs stop at junctions instead of drawing through the crossing.
+    for (let a = -63; a <= 63; a += 21) for (const side of [-2.45, 2.45])
+      for (let start = -63; start < 63; start += 21) {
+        this.line([a + side, .02, start + 2.45], [a + side, .02, start + 18.55], faint);
+        this.line([start + 2.45, .02, a + side], [start + 18.55, .02, a + side], faint);
+      }
+    if (!this.overview) for (const scene of cityWorld().blocks) for (const [x, , z] of scene.lamps) {
+      if ((x - this.player[0]) ** 2 + (z - this.player[2]) ** 2 > 35 ** 2) continue;
+      this.line([x, 0, z], [x, 3.7, z], ink);
+      this.line([x, 3.7, z], [x + .7, 3.7, z], ink);
+      this.label('*', [x + .7, 3.7, z], night ? '#e3b864' : ink);
     }
-    for (let a = -24; a < 24; a += 1.1)
-      for (const b of [-18, 18]) {
-        this.line([a, 0.03, b - 0.8], [a, 0.03, b + 0.8], faint);
-        this.line([b - 0.8, 0.03, a], [b + 0.8, 0.03, a], faint);
-      }
-    for (const x of [-18, 18])
-      for (const z of [-18, -1, 18]) {
-        this.line([x, 0, z], [x, 3.7, z], ink);
-        this.line([x, 3.7, z], [x + 0.7, 3.7, z], ink);
-        this.label('*', [x + 0.7, 3.7, z], night ? '#e3b864' : ink);
-      }
-
-    // Little garden in the gap behind the record shop.
-    for (const [x, z] of [
-      [-6, 14],
-      [-13, -1],
-      [2, 15],
-      [18, -12],
-    ]) {
-      this.line([x, 0, z], [x, 2.5, z], ink);
-      for (let i = 0; i < 320; i++) {
-        const a = i * 2.39996,
-          r = Math.sqrt((i + 0.5) / 320) * 1.4;
-        this.label(
-          i % 3 === 0 ? '&' : i % 3 === 1 ? '*' : '#',
-          [
-            x + Math.cos(a) * r,
-            2.9 + Math.sin(i * 1.9) * 0.95 * Math.sqrt(1 - (r / 1.45) ** 2),
-            z + Math.sin(a) * r,
-          ],
-          night ? ['#56985d', '#71b578', '#448550'][i % 3] : ['#337b3e', '#47944a', '#286b38'][i % 3],
-        );
-      }
+    // Sparse route markers sit on the ground and obey the depth buffer.
+    for (let i = 0; i < this.path.length; i += 6) {
+      const p = this.path[i];
+      this.label('.', [p[0], .08, p[2]], night ? '#ffc16f' : '#b35325');
     }
-    // Zebra crossings at the two ends of each street.
-    for (const edge of [-17, 17])
-      for (let u = -1.8; u < 2; u += 0.65) {
-        this.line([u, 0.06, edge - 0.5], [u, 0.06, edge + 0.5], ink);
-        this.line([edge - 0.5, 0.06, u], [edge + 0.5, 0.06, u], ink);
-      }
-    for (const x of [-2.9, 2.9])
-      for (const z of [-16.7, 16.7]) {
-        this.line([x, 0, z], [x, 0.7, z], ink);
-        this.label('o', [x, 0.7, z], ink);
-      }
     if (this.path.length) {
       const dest = this.path[this.path.length - 1];
       this.label('+', [dest[0], 0.1, dest[2]], '#bb642c');
@@ -1310,37 +1276,53 @@ export class City {
     ctx.fillText('YOU', Math.round(p[0] - 8), Math.round(p[1] - 17));
   }
   attachMap(canvas: HTMLCanvasElement) {
+    this.mapCanvas?.removeEventListener('click', this.mapClick);
     this.mapCanvas = canvas;
+    canvas.addEventListener('click', this.mapClick);
   }
   private drawMap(night: boolean) {
-    const ctx = this.mapCanvas?.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, 136, 136);
-    ctx.fillStyle = night ? '#8b9988' : '#d0cec3';
-    for (const b of this.fixed)
-      ctx.fillRect(
-        68 + b.min[0] * 2.4,
-        68 + b.min[2] * 2.4,
-        (b.max[0] - b.min[0]) * 2.4,
-        (b.max[2] - b.min[2]) * 2.4,
-      );
-    ctx.strokeStyle = night ? '#c79d5c' : '#b35325';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(68 + this.player[0] * 2.4, 68 + this.player[2] * 2.4);
-    for (const p of this.path) ctx.lineTo(68 + p[0] * 2.4, 68 + p[2] * 2.4);
+    const canvas = this.mapCanvas, ctx = canvas?.getContext('2d');
+    if (!ctx || !canvas) return;
+    const size = canvas.width, scale = (size - 8) / (WORLD_LIMIT * 2), mid = size / 2;
+    const px = (x: number) => mid + x * scale;
+    ctx.clearRect(0, 0, size, size);
+    const current = districtAt(this.player[0], this.player[2]);
+    for (const d of DISTRICTS) {
+      ctx.globalAlpha = d === current ? .23 : .08;
+      ctx.fillStyle = d.color;
+      ctx.fillRect(px(d.x - 19), px(d.z - 19), 38 * scale, 38 * scale);
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = night ? '#647160' : '#bbbcae';
+    for (const b of this.fixed) ctx.fillRect(px(b.min[0]), px(b.min[2]),
+      (b.max[0] - b.min[0]) * scale, (b.max[2] - b.min[2]) * scale);
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const d of DISTRICTS) {
+      ctx.fillStyle = night ? '#19231ded' : '#faf9f5e8';
+      ctx.fillRect(px(d.x) - 9, px(d.z) - 6, 18, 12);
+      ctx.fillStyle = night ? '#d2d4bd' : '#51564a';
+      ctx.fillText(d.code, px(d.x), px(d.z));
+    }
+    ctx.strokeStyle = night ? '#ffc16f' : '#b35325'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(px(this.player[0]), px(this.player[2]));
+    for (const p of this.path) ctx.lineTo(px(p[0]), px(p[2]));
     ctx.stroke();
-    ctx.font = 'bold 14px monospace';
+    const x = px(this.player[0]), z = px(this.player[2]);
+    ctx.beginPath(); ctx.moveTo(x, z);
+    ctx.lineTo(x - Math.sin(this.angle) * 9, z - Math.cos(this.angle) * 9); ctx.stroke();
     ctx.fillStyle = night ? '#ffc16f' : '#b35325';
-    ctx.fillText('@', 64 + this.player[0] * 2.4, 72 + this.player[2] * 2.4);
-    ctx.strokeStyle = night ? '#8b9988' : '#85867d';
-    ctx.beginPath();
-    const x = 68 + this.player[0] * 2.4,
-      z = 68 + this.player[2] * 2.4;
-    ctx.moveTo(x, z);
-    ctx.lineTo(x - Math.sin(this.angle) * 12, z - Math.cos(this.angle) * 12);
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, z, 2.8, 0, Math.PI * 2); ctx.fill();
   }
+  private mapClick = (event: MouseEvent) => {
+    if (!this.mapCanvas) return;
+    const rect = this.mapCanvas.getBoundingClientRect();
+    const size = this.mapCanvas.width, scale = (size - 8) / (WORLD_LIMIT * 2);
+    const x = ((event.clientX - rect.left) / rect.width * size - size / 2) / scale;
+    const z = ((event.clientY - rect.top) / rect.height * size - size / 2) / scale;
+    this.visitDistrict(districtAt(x, z).id);
+    this.canvas.focus({ preventScroll: true });
+  };
   private waterTank(x: number, h: number, z: number, ink: string) {
     const radius = 1.2;
     for (let i = 0; i < 16; i++) {
@@ -1406,6 +1388,8 @@ export class City {
         overview: this.overview,
         pov: this.pov,
         selected: this.selected,
+        district: districtAt(this.player[0], this.player[2]).name,
+        identity: districtAt(this.player[0], this.player[2]).identity,
       });
       this.frames = 0;
       this.reportAt = now;
@@ -1413,6 +1397,7 @@ export class City {
     this.frame = requestAnimationFrame(this.tick);
   };
   destroy() {
+    this.mapCanvas?.removeEventListener('click', this.mapClick);
     this.canvas.removeEventListener('pointerdown', this.pointerdown);
     this.canvas.removeEventListener('pointermove', this.pointermove);
     this.canvas.removeEventListener('pointerup', this.pointerup);
