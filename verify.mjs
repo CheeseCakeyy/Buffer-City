@@ -1,24 +1,10 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import ts from 'typescript';
-const detailSource = ts.transpileModule(fs.readFileSync('lib/street-details.ts', 'utf8'), {
-  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
-}).outputText;
-const detailUrl = 'data:text/javascript;base64,' + Buffer.from(detailSource).toString('base64');
-const atlasSource = ts.transpileModule(fs.readFileSync('lib/glyph-atlas.ts', 'utf8'), {
-  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
-}).outputText;
-const atlasUrl = 'data:text/javascript;base64,' + Buffer.from(atlasSource).toString('base64');
-const source = ts.transpileModule(fs.readFileSync('lib/city.ts', 'utf8'), {
-  compilerOptions: {
-    target: ts.ScriptTarget.ES2022,
-    module: ts.ModuleKind.ES2022,
-  },
-}).outputText.replace("'./street-details'", JSON.stringify(detailUrl))
-  .replace("'./glyph-atlas'", JSON.stringify(atlasUrl)) + '\n//# sourceURL=city-test.js';
-const { intersectBox, canWalk, buildings } = await import(
-  'data:text/javascript;base64,' + Buffer.from(source).toString('base64')
-);
+import { cityModuleLoader } from './scripts/load-city.mjs';
+const load = cityModuleLoader();
+const detailUrl = load('lib/street-details.ts'), atlasUrl = load('lib/glyph-atlas.ts');
+const cityUrl = load('lib/city.ts');
+const { intersectBox, canWalk, buildings, cityWorld } = await import(cityUrl);
+const { DISTRICTS, districtAt, districtDestination, WORLD_LIMIT, roadDistance } = await import(load('lib/city-world.ts'));
 const b = { min: [0, 0, 0], max: [2, 2, 2], name: 'test', kind: 'building' };
 assert.equal(intersectBox([1, 1, 5], [0, 0, -1], b).t, 3);
 assert.deepEqual(intersectBox([1, 1, 5], [0, 0, -1], b).normal, [0, 0, 1]);
@@ -29,10 +15,10 @@ assert.deepEqual(intersectBox([1, 5, 1], [0, -1, 0], b).normal, [0, 1, 0]);
 assert.equal(canWalk(0, 0, buildings()), true);
 assert.equal(canWalk(-12, -12, buildings()), false);
 assert.equal(canWalk(-16.2, -12, buildings()), false);
-assert.equal(canWalk(26, 0, buildings()), false);
+assert.equal(canWalk(WORLD_LIMIT, 0, buildings()), false);
 console.log('10 ray intersection and movement collision assertions passed.');
 const { City } = await import(
-  'data:text/javascript;base64,' + Buffer.from(source).toString('base64')
+  cityUrl
 );
 const city = Object.create(City.prototype);
 city.player = [0, 0, 2];
@@ -305,6 +291,45 @@ nearWall.camera();
 assert.ok(nearWall.hiddenFromCamera(person[0]), 'A retracted camera must not render the inside of the avatar');
 console.log('Follow-camera placement, WASD at four headings, turn controls, zoom/reset and wall clearance passed.');
 
+// The entire 3×3 world must be connected, including routes through shared roads.
+assert.equal(DISTRICTS.length, 9);
+assert.equal(new Set(DISTRICTS.map(d => `${d.x},${d.z}`)).size, 9);
+const traveler = simulatedWalker();
+const routeStart = performance.now();
+for (const from of DISTRICTS) for (const to of DISTRICTS) {
+  traveler.player = districtDestination(from);
+  traveler.path = [];
+  assert.equal(districtAt(from.x, from.z), from);
+  assert.ok(traveler.visitDistrict(to.id), `${from.name} must connect to ${to.name}`);
+  if (from !== to) assert.deepEqual(traveler.path.at(-1), districtDestination(to));
+  let previous = traveler.player;
+  for (const p of traveler.path) {
+    assert.ok(canWalk(p[0], p[2], traveler.fixed), 'Routes must clear both buildings and solid props');
+    assert.ok(Math.hypot(p[0] - previous[0], p[2] - previous[2]) <= .500001);
+    assert.ok(canWalk((p[0] + previous[0]) / 2, (p[2] + previous[2]) / 2, traveler.fixed));
+    previous = p;
+  }
+}
+assert.equal(traveler.visitDistrict('missing'), false);
+const intactPath = traveler.path;
+assert.equal(traveler.walkTo(WORLD_LIMIT + 5, 0), false);
+assert.equal(traveler.path, intactPath);
+assert.ok(canWalk(26, 0, traveler.fixed), 'The old boundary must open into the neighboring blocks');
+for (let street = -63; street <= 63; street += 21) for (let along = -63; along <= 63; along += .5) {
+  assert.equal(roadDistance(street), 0);
+  assert.ok(canWalk(street, along, traveler.fixed), 'North–south streets must remain clear');
+  assert.ok(canWalk(along, street, traveler.fixed), 'East–west streets must remain clear');
+}
+for (const scene of cityWorld().blocks) {
+  assert.ok(scene.coarse.some(b => b.kind === 'building'), 'Every block needs permanent architecture');
+  // The pedestrian loop is an unobstructed sidewalk in every block.
+  for (let t = 0; t < 144; t += .5) {
+    const [x, z] = traveler.route(t, 18);
+    assert.ok(canWalk(scene.district.x + x, scene.district.z + z, traveler.fixed), `Sidewalk blocked in ${scene.district.name}`);
+  }
+}
+console.log(`All 81 district routes, shared streets, sidewalk loops and world boundaries passed in ${Math.round(performance.now() - routeStart)} ms.`);
+
 // Exercise complete frames without a browser, including the detailed material
 // pass and near-plane clipping while the first-person camera looks at its feet.
 const noop = () => {};
@@ -349,3 +374,54 @@ for (const pov of ['first', 'second', 'third']) {
     assert.ok(visibleBody, 'Looking down in first person must reveal the player body');
   }
 }
+
+// Check the new districts and the full overview, not just the original crossing.
+renderer.mapCanvas = { width: 180, getContext: () => renderer.ctx };
+for (const d of DISTRICTS) for (const pov of ['first', 'second', 'third']) {
+  renderer.player = districtDestination(d);
+  renderer.setPOV(pov);
+  renderer.angle = .7; renderer.lookPitch = .12;
+  renderer.simulate(0); renderer.render();
+  for (let row = 2; row < renderer.rows; row += 14) for (let col = 2; col < renderer.columns; col += 19) {
+    const x = renderer.gridX + (col + .5) * renderer.cw, y = renderer.gridY + (row + .5) * renderer.ch;
+    const o = renderer.ray(x, y), direction = renderer.rayDirection(x, y);
+    const full = renderer.trace(o, -1, -1, direction), fast = renderer.trace(o, col, row, direction);
+    assert.equal(full?.box, fast?.box, `Screen bins must agree in ${d.name}, ${pov}`);
+    if (full) assert.ok(Math.abs(full.t - fast.t) < 1e-8);
+  }
+}
+renderer.setOverview(); renderer.simulate(0); renderer.render();
+assert.ok(renderer.objects.length < 350, 'The overview must use coarse models, not thousands of door and actor parts');
+for (const d of DISTRICTS) {
+  const p = renderer.project([d.x, 0, d.z]);
+  assert.ok(p[0] > 0 && p[0] < renderer.width && p[1] > 0 && p[1] < renderer.height);
+}
+console.log('All nine districts rendered in all three views; map drawing, screen bins and overview detail budget passed.');
+// The waterfront sits outside the walking grid; its falling sheet remains a
+// real ray-traced surface below ground, including in the accelerated renderer.
+const river = renderer.objects.find(b => b.kind === 'river');
+const falls = renderer.objects.find(b => b.kind === 'waterfall');
+assert.ok(river && falls);
+assert.equal(renderer.trace([0, 10, 71], -1, -1, [0, -1, 0]).box, river);
+assert.equal(renderer.trace([80, -10, 71], -1, -1, [-1, 0, 0]).box, falls);
+assert.equal(canWalk(0, 71, renderer.fixed), false);
+for (const angle of [0, .49, 1.57, 2.8, 4, 5.5]) {
+  renderer.angle = angle; renderer.camera();
+  for (const point of [[-66, .12, 76], [66, .12, 76], [71, -24, 78]]) {
+    const p = renderer.project(point);
+    assert.ok(p[0] > 0 && p[0] < renderer.width && p[1] > 0 && p[1] < renderer.height,
+      'Whole-city framing must include the river and waterfall spray');
+  }
+}
+const waterHit = { t: 1, normal: [0, 1, 0], box: river };
+const sampleWater = () => Array.from({ length: 20 }, (_, i) => renderer.glyph(waterHit, [i, .12, 71], 0, 0, false));
+const waterBefore = sampleWater();
+renderer.paused = false; renderer.simulate(.4);
+assert.notDeepEqual(sampleWater(), waterBefore, 'The current must flow as time advances');
+const frozenWater = sampleWater();
+renderer.paused = true; renderer.simulate(.4);
+assert.deepEqual(sampleWater(), frozenWater, 'Pausing the city must freeze the current');
+console.log('River visibility, below-ground waterfall hits, overview framing and animated/paused current passed.');
+renderer.setPOV('first'); renderer.setPOV('third');
+assert.equal(renderer.overview, false);
+assert.equal(renderer.span, 45, 'Leaving the overview through the camera menu must restore the street zoom');

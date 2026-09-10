@@ -7,7 +7,9 @@ positions in a three-dimensional coordinate system. A custom CPU renderer
 works out which surface is visible through every character cell and draws one
 character into that cell.
 
-The core engine is in [`lib/city.ts`](lib/city.ts). The React page in
+The core engine is in [`lib/city.ts`](lib/city.ts). The 3×3 neighborhood generator
+is in [`lib/city-world.ts`](lib/city-world.ts), and cached pedestrian navigation
+is in [`lib/walking-grid.ts`](lib/walking-grid.ts). The React page in
 [`app/page.tsx`](app/page.tsx) creates the canvases, starts the engine, displays
 its statistics, and connects the interface controls. [`app/globals.css`](app/globals.css)
 controls the page layout. [`verify.mjs`](verify.mjs) checks geometry,
@@ -40,8 +42,10 @@ and navigation checks.
 - Use WASD or the arrow keys to walk manually. Hold Shift to run.
 - Drag horizontally or use Q and E to rotate the camera.
 - Scroll or use the buttons to zoom.
-- **Whole block** switches between the following view and the overview.
-- **Find me** recenters the camera without moving the player.
+- **Whole city** fits all nine neighborhoods into the orthographic overview.
+- Choose a destination in **Walk to a neighborhood**, or click a minimap tile,
+  to walk to its southern entrance. These actions create routes, not teleports.
+- **Reset view** recenters the camera without moving the player.
 - Home restores the initial player position `(0, 0, 18)` and camera.
 - Pause freezes the clock, cars, and residents. Camera and player controls
   continue to work.
@@ -63,25 +67,48 @@ type Box = {
 ```
 
 X and Z are the two ground axes, and Y is height. A box is represented by its
-minimum and maximum corners. Buildings are created in `buildings()` using a
-helper whose arguments are ground position, width, depth, height, name, kind,
-and description.
+minimum and maximum corners. `mapleBuildings()` preserves the original central
+buildings; `generateWorld()` creates the surrounding blocks. Its local `add()`
+helper offsets each shape by its district's X/Z origin. `cityWorld()` caches the
+result. The exported `buildings()` function returns the collision collection,
+which now includes low solid props as well as buildings.
 
 ```ts
 box(-16, -16, 7, 9, 12, 'Maple House', 'building', '...')
 ```
 
 Maple House begins at `x = -16`, `z = -16`; it is 7 units wide, 9 units deep,
-and 12 units high. Ten boxes form the main buildings. `simulate()` adds boxes
-for rooftop structures, awnings, signs, parked cars, moving vehicles,
-residents, and the player.
+and 12 units high. Those ten original buildings remain at the center of a city
+with 39 buildings. Permanent roofs, awnings, signs, trees, construction pieces,
+ponds and furniture are created once. `simulate()` selects the appropriate
+detail level and updates moving vehicles, residents, and the player.
+
+### Nine connected neighborhoods
+
+| North → south | West | Center | East |
+| --- | --- | --- | --- |
+| North row | CR · Cedar Row: residential | MS · Market Square: commercial | FW · Foundry Works: construction |
+| Middle row | JP · Juniper Park: park | MP · Maple Street: mixed use | CQ · Civic Quarter: civic buildings |
+| South row | DY · Depot Yard: industrial | GC · Garden Courts: courtyard homes | AL · Arts Lane: galleries and cafés |
+
+District centers are at X/Z = −42, 0, or 42. Each district occupies a 42×42
+tile. Perimeter roads are shared with neighbors; central cross streets continue
+through the grid. Road centerlines repeat every 21 units, with a 2.4-unit half
+width. Ground extends to ±66; the player's center stays inside ±65. Streets,
+sidewalks, crossings and open alleys connect the districts without loading screens.
+
+The park has a pond and groves; the construction block has open floors, columns,
+a tower crane, barriers and timber; the depot has warehouses, containers and
+parked buses. District-specific ground patterns, building colors, signs and
+street furniture help distinguish the places even at a distance.
 
 Buildings remain axis-aligned. [`lib/street-details.ts`](lib/street-details.ts)
 builds people, vehicles, benches and doors from individually shaded solid parts.
 Each model has a local coordinate frame and yaw; rays are transformed into that
 frame before intersection, then normals are transformed back into the world.
 Wheels use capped cylinders within their bounding boxes. Decorative features
-such as upper window frames, fire escapes, trees and lamps are mostly 3D lines. These lines are visible
+such as upper window frames, fire escapes and lamps are mostly 3D lines. Trees
+now have solid trunks and shaded canopy boxes. The projected lines are visible
 and can be hidden by solid geometry, but they do not necessarily block rays or
 movement themselves.
 
@@ -108,7 +135,7 @@ for controls and how the player is rendered in each view.
 `camera()` computes three unit directions: `right` points toward the right side
 of the screen, `up` points toward its top, and `direction` points into the
 world. Street view uses a 27-degree downward pitch and starts at a 28-degree
-yaw. Whole-block mode uses a 35.264-degree pitch. The overview is strictly
+yaw. Whole-city mode uses a 35.264-degree pitch. The overview is strictly
 isometric only at symmetric yaw angles such as 45 degrees.
 
 This is an orthographic camera. It uses parallel rays, so distant objects do
@@ -296,9 +323,13 @@ creates one picking ray through the pointer position, and `trace()` determines
 whether it hit a box or the ground.
 
 A box hit selects that object and displays its description. For a ground hit,
-`walkTo()` searches for a route on a half-unit grid using breadth-first search.
+`walkTo()` asks `WalkingGrid` for a route on a half-unit grid using breadth-first
+search. The 265×265 occupancy array is built once from solid footprints and
+reused. Typed arrays hold the queue and parent indices, so a long route does not
+allocate thousands of string keys or recheck every building for each cell.
 `canWalk()` rejects positions outside the world or within a 0.35-unit margin
-around a building.
+around a building, tree trunk, pond, or other low solid prop. Moving actors and
+detail-only benches/parked vehicles do not participate in pedestrian collision.
 
 The route is a list of waypoints. The player consumes the available movement
 distance across as many waypoints as necessary each frame. Manual movement
@@ -306,7 +337,37 @@ cancels the route. X and Z are checked separately, which lets the player slide
 along a wall when only one axis is blocked.
 
 The minimap is a separate Canvas 2D drawing. It shows static building
-footprints, player position, camera direction, and the remaining route.
+footprints, two-letter district codes, player position, camera direction, and the
+remaining route. Clicking a map tile routes to a known clear entrance rather
+than to a building under the pointer. The neighborhood selector provides the
+same action through a keyboard-accessible control, with full district names.
+
+### Keeping the larger world responsive
+
+- `generateWorld()` caches static geometry and detailed models once.
+- Doors, benches and parked vehicles activate within 32 units of the player.
+  Vehicles use multipart models within 28 units; pedestrians within 26 units.
+  Farther actors use coarse shapes, and distant architecture retains its silhouette.
+- The overview omits tiny furniture and pedestrians and uses simple vehicles;
+  all nine blocks remain present, with fewer than 350 solid parts in total.
+- A bounding sphere rejects objects outside the camera view. Surviving boxes
+  get conservatively clipped screen bounds. Each row is divided into bins of
+  16 character columns; rays test only their bin, sorted from near to far.
+- Window linework is limited to nearby, on-screen buildings. The existing
+  depth buffer, reusable vectors and glyph atlas remain in use.
+
+`node verify.mjs` checks all 81 district routes, unobstructed street and sidewalk
+loops, all camera modes, and accelerated intersections against exhaustive tests.
+`node benchmark.mjs outputs/city-profile.json` measures CPU time at 1600×900
+for the original crossing, shops and vehicles plus the park, construction site,
+market and overview. Drawing commands are stubbed: these are CPU measurements,
+not measured browser FPS. A larger skyline and more filled cells still add cost;
+actual FPS depends on the device, viewport and browser canvas implementation.
+
+Traffic consists of 27 vehicles following district perimeter loops at radius
+20.2. Neighboring blocks use opposite sides of their shared road. There are 64
+residents, with extra pedestrians around the market and park. These routes have
+no traffic-light logic, intersection yielding, bus schedules, or dynamic collisions.
 
 ## 10. Debug views and current limits
 

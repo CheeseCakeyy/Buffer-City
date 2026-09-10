@@ -805,6 +805,52 @@ main:has(canvas[data-night='true']) .touch-controls button {
 .world[data-pov='second'] > canvas {
   cursor: grab;
 }
+
+.district-navigation {
+  position: absolute;
+  left: 28px;
+  top: 104px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 12px 14px;
+  border-left: 2px solid #a5ad94;
+  background: #faf9f5e8;
+  border-radius: 0 7px 7px 0;
+  max-width: calc(100% - 110px);
+}
+.district-navigation > strong { font: 22px Georgia, serif; }
+.district-navigation select {
+  max-width: 100%;
+  min-height: 40px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #a5ad9466;
+  font: 12px monospace;
+}
+.district-navigation select:focus-visible { outline: 2px solid #b87927; }
+.neighborhood-map { width: 180px; pointer-events: auto; background: #faf9f5df; border-radius: 5px; }
+.neighborhood-map canvas { width: 180px; height: 180px; cursor: pointer; }
+.neighborhood-map small { display: block; margin-top: 6px; font: 9px monospace; }
+.inspection { bottom: 324px; }
+main:has(canvas[data-night='true']) .district-navigation { background: #1c2822ed; color: #c8cbbb; }
+main:has(canvas[data-night='true']) .district-navigation select { color-scheme: dark; }
+main:has(canvas[data-night='true']) .neighborhood-map { background: #1c2822df; }
+@media (min-width: 801px) and (max-width: 1100px) {
+  .neighborhood-map { bottom: 180px; }
+  .inspection { display: none; }
+}
+@media (max-width: 800px) {
+  .district-navigation { top: 86px; left: 12px; padding: 8px 10px; max-width: calc(100% - 132px); }
+  .district-navigation > strong { font-size: 18px; }
+  .district-navigation .eyebrow { font-size: 10px; letter-spacing: 0; }
+  .district-navigation select { font-size: 12px; width: 220px; min-height: 44px; }
+  .neighborhood-map { width: 96px; top: 112px; }
+  .neighborhood-map canvas { width: 96px; height: 96px; }
+  .neighborhood-map small { font-size: 10px; }
+}
 .world[data-pov='second'] > canvas:active {
   cursor: grabbing;
 }
@@ -838,6 +884,6 @@ main:has(canvas[data-night='true']) .camera-controls select {
     font-size: 11px;
   }
   .touch-controls { bottom: 266px; }
-  .neighborhood-map { bottom: 250px; }
+  .neighborhood-map { bottom: auto; }
   .explanation { bottom: 80px; }
 }

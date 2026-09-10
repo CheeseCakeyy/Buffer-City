@@ -2,7 +2,7 @@
 
 Use the Point of view menu beneath the drawing.
 
-- Third person preserves the orthographic 2.5D drawing and whole-block option.
+- Third person preserves the orthographic drawing; **Whole city** fits the 3×3 grid.
 - First person puts the camera at eye height. WASD walks, Q/E or horizontal
   dragging turns, and vertical dragging looks up/down. Scroll changes field of view.
 - **2nd · Follow behind** puts the camera above and behind your character,
@@ -35,7 +35,9 @@ Their parts use local coordinates and a shared rotation, so clothing, window
 frames, lights and handles stay attached as the model turns. Wheels use capped
 cylinders for rounded silhouettes. Benches have real gaps between slats and below
 the seat. Doors have solid frames, panels, glazing, thresholds and handles;
-they remain closed exterior details. Navigation still uses building footprints.
+they remain closed exterior details. Navigation uses building and low solid-prop
+footprints across all nine districts. The minimap and neighborhood selector both
+start walking routes, while the camera controls preserve your current location.
 
 The third-person grid stays anchored to the world. Perspective uses a fixed screen
 grid: changing viewpoint necessarily changes which surface each character samples.
