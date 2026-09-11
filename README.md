@@ -1,85 +1,107 @@
 # ASCII City
 
-An explorable ASCII city with a river, waterfall, and visitor yard across a pedestrian bridge.
+An explorable ASCII city with nine neighborhoods, a river and waterfall, and a visitor yard across a bridge.
 
-## Project layout
+## Repository layout
 
 ```text
-frontend/
-  app/                 Page, styles, layout, and a thin API route adapter
-  components/          Visitor yard panel and existing UI components
-  lib/                 City renderer, walking grid, and world models
-  hooks/               UI hooks
-  public/              Static assets
-backend/
-  visitors.ts          Visitor HTTP service, validation, limits, moderation
-  worker.ts            Independently deployable API entrypoint
-  db/schema.ts         Database schema
-  scripts/             Owner moderation command
-  test/                Persistent SQLite/API tests
-  wrangler.jsonc       Standalone API configuration
-db/schema.ts           Sites schema entrypoint (re-exports the backend schema)
-drizzle/               Generated, versioned SQL migrations
-scripts/               Shared verification and local tooling
-vite.config.ts         Shared build and deployment integration
+frontend/           React/Vinext app, renderer, assets, npm files, builds and tests
+backend/            Python/FastAPI app, SQLite database, migrations, tests and Dockerfile
+README.md           Setup and deployment
+HOW_IT_WORKS.md     How the city and visitor yard work
 ```
 
-One root package.json and lockfile deliberately manage both folders. Run commands from the repository root. Frontend rendering does not contain database queries or secrets. `frontend/app/api/visitors/route.ts` only delegates requests to the backend service. This keeps one-origin deployment simple while allowing the API to run separately later.
+The root also contains Git's hidden `.git/` and `.gitignore`. All application configuration, dependencies, generated output and supporting documents live inside the relevant app folder. Each service is installed and started independently.
 
-## Local development
+## Run locally
 
-Use Node 22.13 or newer (Node 24 is used for verification).
+Use Python 3.11+ and Node 22.13+.
+
+**Backend — terminal 1**
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
+```
+
+On macOS/Linux, use `.venv/bin/python` instead of `.venv\Scripts\python.exe`.
+
+**Frontend — terminal 2**
 
 ```sh
+cd frontend
 npm ci
-npm run db:migrate
 npm run dev
 ```
 
-Open the URL printed by the server. Choose **Visitor yard**, then **Walk across the bridge**, or select Visitor Yard from the neighborhood menu. When you arrive, leave a name at the pedestal or use the yard panel. Click a stone to read its full name/date or copy its link.
+Open the frontend URL printed by the server (normally http://localhost:3000). The frontend forwards `/api/visitors` to FastAPI on port 8000. Keep both processes running.
 
-The local D1 database lives in ignored `.wrangler/state`. It survives server restarts. Local previews and the standalone API share this state. The database starts empty; there are no invented visitors. Localhost has a development-only secret fallback. Hosted writes require an explicit secret.
+Choose **Visitor yard**, cross the bridge, and leave your name. Names are saved in `backend/data/visitors.sqlite3`, which survives restarts. Existing migrated visitor IDs, dates, positions, and share links are preserved. A read-only source backup remains in `backend/data/legacy-wrangler/`.
+
+Local development has matching development-only secrets in both services. For customization, copy `backend/.env.example` to `backend/.env` and `frontend/.dev.vars.example` to `frontend/.dev.vars`. Both files are ignored by Git. `PUBLIC_ORIGIN` must match the browser's frontend origin.
+
+## Checks
+
+From `frontend/`:
 
 ```sh
-npm test                 # Rendering, walking routes, and database/API behavior
+npm test
 npm run typecheck
-npm run build            # Combined frontend + backend Worker in dist/
-npm run build:backend    # Standalone API bundle in backend/dist/ (no deployment)
-npm run dev:backend      # Optional API-only local server, port 8787
+npm run build
 ```
 
-## Visitor records
+From `backend/`:
 
-Slates contain a generated ID, display name, creation time, stable sequence/position, and hidden status. An HTTP-only browser cookie is hashed server-side to recognize an existing visit. Retrying a submission returns the same slate. This is a best-effort one-slate-per-browser rule; clearing cookies or changing devices can create another visit.
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest
+```
 
-Names support Unicode letters and numbers plus spaces, apostrophes, underscores, and hyphens, up to 24 Unicode code points. There are no messages or links. The server bounds request sizes, validates names, rejects cross-origin writes, and allows at most five new submission attempts per network per hour. Network identifiers are keyed hashes that change hourly, never stored raw. Expired limit rows are pruned on subsequent submissions.
-
-Each garden page has 48 assigned slots. Hidden entries retain their slots, so shared links and other visitors' positions stay stable. The UI refreshes the current page every 30 seconds while the tab is visible, and fetches only one garden at a time. Full names and dates are available in the panel, including names too long to read directly on an ASCII stone.
+The frontend checks cover geometry, walking routes, cameras, full names and centered inscriptions. Backend tests use temporary SQLite databases to check persistence, concurrency, moderation, rate limits, migration compatibility and shared links. They do not add fake names to your actual visitor yard.
 
 ## Deployment
 
-The default build keeps the frontend and backend on the same origin and is compatible with the existing Sites project. `.openai/hosting.json` declares the logical D1 binding `DB`; Sites provisions and binds the production database and applies the generated `drizzle/` migrations during publication. Local data is not automatically copied into production.
+Deploy the two folders as separate services.
 
-Before production, configure two separate random secrets of at least 32 characters in the host's secret settings:
+- **Frontend:** set its project directory to `frontend/`, install with `npm ci`, and build with `npm run build`. The retained Sites/Cloudflare build configuration lives in `frontend/.openai/` and `frontend/vite.config.ts`. Output is `frontend/dist/`.
+- **Backend:** use a Python host or build the Dockerfile with `backend/` as the build context. Run `uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers`. The backend runs separately from the frontend's Worker.
+- **Database:** mount a persistent volume at `/app/data` for Docker, or set `DATABASE_PATH` to a persistent path on your Python host. SQLite supports this single-instance service; do not put independent backend replicas on separate database files. Back up the database before deployment changes.
 
-- `VISITOR_SECRET`: stable HMAC secret for visitor/network identifiers. Changing it invalidates existing browser recognition.
-- `VISITOR_ADMIN_TOKEN`: owner-only moderation credential. Never include it in frontend code or public environment variables.
+Configure these server-side environment values:
 
-`.dev.vars.example` documents their names. For local moderation, copy it to `.dev.vars` and populate the admin token; the standalone API reads `backend/.dev.vars` instead. Keep these files out of Git.
+| Service | Variable | Purpose |
+| --- | --- | --- |
+| Frontend | `BACKEND_URL` | Reachable HTTPS URL of the Python service |
+| Both | `BACKEND_PROXY_SECRET` | Same random secret, at least 32 characters |
+| Backend | `ENVIRONMENT` | `production` |
+| Backend | `PUBLIC_ORIGIN` | Exact HTTPS origin of the frontend |
+| Backend | `VISITOR_SECRET` | Stable random secret, at least 32 characters |
+| Backend | `VISITOR_ADMIN_TOKEN` | Separate random moderation token, at least 32 characters |
+| Backend | `DATABASE_PATH` | Persistent SQLite file location |
 
-For an independent Cloudflare API deployment, use `backend/worker.ts` and `backend/wrangler.jsonc`. Replace the placeholder database ID with the real D1 ID, configure the secrets on that Worker, and apply the same migrations to its database before routing traffic. Route `/api/visitors` to that Worker **under the same public origin as the city**. The frontend already calls this path. Cross-origin API hosting is intentionally not enabled; it would require explicit CORS and cookie changes. The default combined build remains available, so splitting the physical deployments is optional.
+The browser always calls its own frontend origin. The frontend authenticates requests to Python and forwards cookies; database code and credentials are never shipped to the browser. Direct requests to the Python visitor API require the proxy credential. `/health` reports database readiness without credentials.
 
-No production deployment is performed by `npm run build` or `npm run build:backend`.
+Keep `VISITOR_SECRET` stable: changing it breaks recognition of existing browser cookies. When moving existing data to a production host, preserve both the database and the secret that created its visitor hashes. Do not reuse development-only fallback secrets in production.
 
-## Hide or restore a slate
+SQLite migrations in `backend/migrations/*.sql` run transactionally during backend startup. Applied migrations are recorded in `schema_migrations`. Add new migrations rather than rewriting applied files.
 
-Set `VISITOR_ADMIN_TOKEN` in your shell environment, using the same value configured on the backend. Take the slate ID from its copied link, then run:
+No build or test command deploys either service.
 
-```sh
-npm run slate:moderate -- https://your-city.example slate-uuid hide
-npm run slate:moderate -- https://your-city.example slate-uuid restore
+## Visitor records and moderation
+
+Visitors leave a public name/nickname of up to 24 Unicode characters. An HTTP-only cookie provides a best-effort one-slate-per-browser rule. Clearing cookies or using another device can create a new visit. Names are validated, links are disallowed, and each network can make at most five new submission attempts per hour. Rate-limit identifiers are keyed hashes rather than stored IP addresses.
+
+Each garden page has 48 assigned slots. Hiding a name preserves its slot and keeps all other stones in place. A full name is centered on the stone, wrapping when necessary. At distant zoom levels inscriptions naturally become small; click a slate to read it in the panel.
+
+To hide or restore a slate, set `VISITOR_ADMIN_TOKEN` in `backend/.env` to the backend's configured token, then from `backend/` run:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/moderate.py https://your-city.example slate-uuid hide
+.\.venv\Scripts\python.exe scripts/moderate.py https://your-city.example slate-uuid restore
 ```
 
-Hiding is reversible. It removes the slate from public listing and lookup, while retaining its slot and preventing that browser from submitting a replacement. The token is never saved in a browser.
+The slate ID is in its copied link. Hiding is reversible and prevents that browser from submitting a replacement.
 
-For later schema changes, edit `backend/db/schema.ts`, run `npm run db:generate`, inspect the generated migration, and apply it locally with `npm run db:migrate`. Keep deployed migration files and their metadata immutable.
+For another local D1-to-Python import, stop writes and use `backend/scripts/import_d1.py` with the source SQLite path. The script uses SQLite's backup API, preserves the source, and refuses to overwrite an existing target.

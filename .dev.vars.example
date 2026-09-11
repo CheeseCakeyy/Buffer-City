@@ -1,5 +1,0 @@
-# Copy to .dev.vars for the combined app, or backend/.dev.vars for the API Worker.
-# Generate separate random values, at least 32 characters each. Never commit secrets.
-# Localhost works without VISITOR_SECRET using a development-only fallback.
-VISITOR_SECRET=
-VISITOR_ADMIN_TOKEN=

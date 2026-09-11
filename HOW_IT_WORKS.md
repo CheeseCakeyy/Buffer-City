@@ -7,12 +7,12 @@ positions in a three-dimensional coordinate system. A custom CPU renderer
 works out which surface is visible through every character cell and draws one
 character into that cell.
 
-The core engine is in [`lib/city.ts`](lib/city.ts). The 3×3 neighborhood generator
-is in [`lib/city-world.ts`](lib/city-world.ts), and cached pedestrian navigation
-is in [`lib/walking-grid.ts`](lib/walking-grid.ts). The React page in
-[`app/page.tsx`](app/page.tsx) creates the canvases, starts the engine, displays
-its statistics, and connects the interface controls. [`app/globals.css`](app/globals.css)
-controls the page layout. [`verify.mjs`](verify.mjs) checks geometry,
+The core engine is in [`lib/city.ts`](frontend/lib/city.ts). The 3×3 neighborhood generator
+is in [`lib/city-world.ts`](frontend/lib/city-world.ts), and cached pedestrian navigation
+is in [`lib/walking-grid.ts`](frontend/lib/walking-grid.ts). The React page in
+[`app/page.tsx`](frontend/app/page.tsx) creates the canvases, starts the engine, displays
+its statistics, and connects the interface controls. [`app/globals.css`](frontend/app/globals.css)
+controls the page layout. [`verify.mjs`](frontend/verify.mjs) checks geometry,
 navigation, and important rendering behavior.
 
 ```text
@@ -102,7 +102,7 @@ a tower crane, barriers and timber; the depot has warehouses, containers and
 parked buses. District-specific ground patterns, building colors, signs and
 street furniture help distinguish the places even at a distance.
 
-Buildings remain axis-aligned. [`lib/street-details.ts`](lib/street-details.ts)
+Buildings remain axis-aligned. [`lib/street-details.ts`](frontend/lib/street-details.ts)
 builds people, vehicles, benches and doors from individually shaded solid parts.
 Each model has a local coordinate frame and yaw; rays are transformed into that
 frame before intersection, then normals are transformed back into the world.
@@ -129,7 +129,7 @@ an object's coordinates changes where the renderer finds it on the next frame.
 The third-person drawing uses the orthographic camera described below. First
 person and second person use a perspective camera: rays share an origin at the
 camera, and their directions spread across the screen. Projection divides by
-forward depth, making distant objects smaller. See [`CAMERA_VIEWS.md`](CAMERA_VIEWS.md)
+forward depth, making distant objects smaller. See [`CAMERA_VIEWS.md`](frontend/docs/CAMERA_VIEWS.md)
 for controls and how the player is rendered in each view.
 
 `camera()` computes three unit directions: `right` points toward the right side
@@ -278,7 +278,7 @@ of offscreen samples.
 
 Surface glyphs, details, and labels compete through a priority array. `stamp()`
 keeps the higher-priority character for a cell. At the end of the frame,
-`render()` uses [`lib/glyph-atlas.ts`](lib/glyph-atlas.ts) to rasterize each
+`render()` uses [`lib/glyph-atlas.ts`](frontend/lib/glyph-atlas.ts) to rasterize each
 character/color combination once onto a small offscreen canvas. Each non-empty
 cell then copies its cached glyph with `drawImage()`. This preserves the font,
 color, character spacing and detail while avoiding thousands of repeated text
@@ -380,5 +380,29 @@ The **How it works** panel exposes three render modes:
 The project currently has no interiors, triangle meshes,
 reflections, refractions, cast-shadow rays, save system, physics traffic,
 dynamic obstacle avoidance, full resident schedules, or infinite city. See
-[`DETAILS.md`](DETAILS.md) for the code areas to change when increasing visual
+[`DETAILS.md`](frontend/docs/DETAILS.md) for the code areas to change when increasing visual
 detail and world complexity.
+
+## Visitor yard and Python backend
+
+The code is split into two independently started services. Everything related to
+rendering and the browser lives in `frontend/`. The Python/FastAPI application,
+database migrations, and tests live in `backend/`.
+
+The browser calls `/api/visitors` on the frontend. A small server-side proxy sends
+the request to FastAPI, authenticating with a shared secret and forwarding the
+visitor cookie. FastAPI owns all validation, database access, pagination, rate
+limits, duplicate protection, and owner moderation. SQLite stores names, dates,
+stable placement sequences, hidden status, and hashed browser identifiers.
+Transactions prevent simultaneous submissions from claiming multiple stones.
+
+The bridge extends the walkable ground across the river into a separate garden.
+Each page has 48 flush stone slots. Only the current page's names are loaded.
+Slates keep their complete name: the inscription renderer wraps long names into
+lines, centers the block horizontally and vertically, and projects it onto the
+stone's top surface. A depth mask keeps nearer geometry in front of the lettering.
+This crisp text pass complements the city's ASCII surface rendering.
+
+The local database is `backend/data/visitors.sqlite3`. The original local D1
+database is retained as a migration backup. Existing records keep their IDs,
+creation times, positions and shared links.

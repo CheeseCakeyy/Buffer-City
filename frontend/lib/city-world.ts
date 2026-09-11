@@ -205,7 +205,7 @@ export function generateWorld(maple: Box[]): CityWorld {
   // Flush stone slots keep all garden aisles walkable, independent of loaded pages.
   for (let i = 0; i < 48; i++) {
     const [x, , z] = slatePosition(i);
-    yardProp({ min: [x - 1.15, .01, z - .6], max: [x + 1.15, .08, z + .6], name: 'Empty slate setting', kind: 'slate-empty' }, false);
+    yardProp({ min: [x - 1.55, .01, z - .95], max: [x + 1.55, .08, z + .95], name: 'Empty slate setting', kind: 'slate-empty' }, false);
   }
   return world;
 }

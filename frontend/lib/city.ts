@@ -4,6 +4,7 @@ import type { VisitorSlate } from './visitor-types';
 import { WalkingGrid } from './walking-grid';
 import type { Finish, Frame } from './street-details';
 import { GlyphAtlas } from './glyph-atlas';
+import { inscriptionLines } from './slate-inscription';
 
 export type Vec = [number, number, number];
 export type Box = {
@@ -298,7 +299,7 @@ export class City {
     this.visitorSlates = slates;
     this.slateBoxes = slates.map(slate => {
       const [x, , z] = slatePosition(slate.slot);
-      return { min: [x - 1.15, .08, z - .6], max: [x + 1.15, .2, z + .6],
+      return { min: [x - 1.55, .08, z - .95], max: [x + 1.55, .2, z + .95],
         name: slate.name, kind: 'visitor-slate', feature: slate.id, detail: `Visited ${new Date(slate.createdAt).toLocaleDateString()}` };
     });
   }
@@ -1069,6 +1070,7 @@ export class City {
         this.atlas.draw(ctx, this.glyphs[i], this.colors[i], x + col * this.cw, y + row * this.ch);
       }
     if (this.mode === 'ink' && this.perspective) this.drawShopSigns(night);
+    if (this.mode === 'ink') this.drawSlateInscriptions(night);
     this.drawPlayer(night);
     this.drawMap(night);
   }
@@ -1193,7 +1195,6 @@ export class City {
       // would fill the spaces between limbs, wheels, and bench slats with ink.
       if (b.finish || !this.visibleObjects?.has(b) || ['foliage', 'river', 'waterfall', 'cliff', 'slate-empty'].includes(b.kind)) continue;
       if (b.kind === 'visitor-slate') {
-        if (!this.overview) this.label(b.name.slice(0, 3).toUpperCase(), [b.min[0] + .2, .24, b.min[2] + .7], faint);
         continue;
       }
       if (b.kind === 'person' || b.kind === 'player') continue;
@@ -1337,6 +1338,56 @@ export class City {
     if (this.path.length) {
       const dest = this.path[this.path.length - 1];
       this.label('+', [dest[0], 0.1, dest[2]], '#bb642c');
+    }
+  }
+  private drawSlateInscriptions(night: boolean) {
+    const ctx = this.ctx;
+    for (const b of this.slateBoxes ?? []) {
+      if (!this.visibleObjects?.has(b)) continue;
+      const y = b.max[1] + .015;
+      const a = this.project([b.min[0] + .12, y, b.min[2] + .1]);
+      const right = this.project([b.max[0] - .12, y, b.min[2] + .1]);
+      const bottom = this.project([b.min[0] + .12, y, b.max[2] - .1]);
+      const opposite = this.project([b.max[0] - .12, y, b.max[2] - .1]);
+      const corners = [a, right, opposite, bottom];
+      if (this.perspective && corners.some(p => p[2] < .08)) continue;
+      const width = Math.hypot(right[0] - a[0], right[1] - a[1]);
+      if (width < 4) continue;
+      const x0 = Math.max(0, Math.floor((Math.min(...corners.map(p => p[0])) - this.gridX) / this.cw));
+      const x1 = Math.min(this.columns - 1, Math.ceil((Math.max(...corners.map(p => p[0])) - this.gridX) / this.cw));
+      const y0 = Math.max(0, Math.floor((Math.min(...corners.map(p => p[1])) - this.gridY) / this.ch));
+      const y1 = Math.min(this.rows - 1, Math.ceil((Math.max(...corners.map(p => p[1])) - this.gridY) / this.ch));
+      ctx.save();
+      ctx.beginPath();
+      // Clip the inscription against nearer geometry, including the visitor avatar.
+      for (let row = y0; row <= y1; row++) for (let col = x0; col <= x1; col++) {
+        const px = this.gridX + (col + .5) * this.cw, py = this.gridY + (row + .5) * this.ch;
+        const origin = this.ray(px, py), direction = this.rayDirection(px, py);
+        const t = (y - origin[1]) / direction[1];
+        if (t >= 0 && t <= this.depths[row * this.columns + col] + .3)
+          ctx.rect(this.gridX + col * this.cw, this.gridY + row * this.ch, this.cw, this.ch);
+      }
+      ctx.clip();
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]);
+      for (const p of corners.slice(1)) ctx.lineTo(p[0], p[1]);
+      ctx.closePath(); ctx.clip();
+      ctx.fillStyle = night ? '#385047' : '#dce3d9';
+      ctx.fill();
+      // Affine text coordinates follow the stone's top face; the projected center
+      // is used as the origin so full names stay centered at every camera angle.
+      const center = this.project([(b.min[0] + b.max[0]) / 2, y, (b.min[2] + b.max[2]) / 2]);
+      const u = [(right[0] - a[0]) / 600, (right[1] - a[1]) / 600];
+      const v = [(bottom[0] - a[0]) / 320, (bottom[1] - a[1]) / 320];
+      const flip = u[0] < 0 ? -1 : 1;
+      ctx.transform(u[0] * flip, u[1] * flip, v[0] * flip, v[1] * flip, center[0], center[1]);
+      const lines = inscriptionLines(b.name);
+      const maxLength = Math.max(...lines.map(line => Array.from(line).length));
+      const fontSize = Math.min(108, 520 / (maxLength * .63), 220 / (lines.length * 1.2));
+      ctx.font = `bold ${fontSize}px "Courier New", monospace`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = b.name === this.selectedName ? (night ? '#f5d99c' : '#6c4828') : (night ? '#e3eee2' : '#34483b');
+      lines.forEach((line, i) => ctx.fillText(line, 0, (i - (lines.length - 1) / 2) * fontSize * 1.2, 540));
+      ctx.restore();
     }
   }
   private drawPlayer(night: boolean) {
