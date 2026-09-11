@@ -387,14 +387,20 @@ detail and world complexity.
 
 The code is split into two independently started services. Everything related to
 rendering and the browser lives in `frontend/`. The Python/FastAPI application,
-database migrations, and tests live in `backend/`.
+Chroma Cloud adapter, legacy import tools, and tests live in `backend/`.
 
 The browser calls `/api/visitors` on the frontend. A small server-side proxy sends
 the request to FastAPI, authenticating with a shared secret and forwarding the
 visitor cookie. FastAPI owns all validation, database access, pagination, rate
-limits, duplicate protection, and owner moderation. SQLite stores names, dates,
-stable placement sequences, hidden status, and hashed browser identifiers.
-Transactions prevent simultaneous submissions from claiming multiple stones.
+limits, duplicate protection, and owner moderation. Chroma Cloud stores names,
+dates, stable placement sequences, hidden status, and hashed browser/network
+identifiers as metadata. A fixed vector avoids running an embedding model.
+The API uses a process lock and requires one active writer per collection,
+including during deployment and imports. A deterministic visitor UUID makes
+retries after uncertain cloud responses reuse the original record. Hourly
+network limits are counted from stored slates, so backend restarts do not reset
+them. The adapter scans metadata in batches of 300; this is a small-garden
+implementation, not a distributed transaction system.
 
 The bridge extends the walkable ground across the river into a separate garden.
 Each page has 48 flush stone slots. Only the current page's names are loaded.
@@ -403,6 +409,9 @@ lines, centers the block horizontally and vertically, and projects it onto the
 stone's top surface. A depth mask keeps nearer geometry in front of the lettering.
 This crisp text pass complements the city's ASCII surface rendering.
 
-The local database is `backend/data/visitors.sqlite3`. The original local D1
-database is retained as a migration backup. Existing records keep their IDs,
-creation times, positions and shared links.
+The backend reads `CHROMA_API_KEY`, `CHROMA_TENANT`, `CHROMA_DATABASE`, and
+`CHROMA_COLLECTION` from its environment. No cloud credentials are bundled into
+the frontend. Local SQLite/D1 files remain backups only. The explicit
+`backend/scripts/import_sqlite.py` importer preserves their IDs, creation times,
+positions and shared links without changing the source. Cloud records remain
+independent of the Render backend's temporary filesystem.

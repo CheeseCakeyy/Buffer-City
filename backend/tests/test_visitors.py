@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import create_app
 from app.settings import Settings
+from app.database import VisitorStore
 
 SECRET = 'test-visitor-secret-000000000000000000'
 PROXY = 'test-proxy-secret-00000000000000000000'
@@ -15,8 +16,13 @@ HEADERS = {'x-city-proxy-token': PROXY, 'x-city-client-ip': '203.0.113.8', 'orig
 
 
 @pytest.fixture
-def settings(tmp_path):
-    return Settings(tmp_path / 'visitors.sqlite3', SECRET, ADMIN, PROXY, 'http://localhost:3000')
+def settings():
+    return Settings(SECRET, ADMIN, PROXY, 'http://localhost:3000')
+
+
+@pytest.fixture(autouse=True)
+def cloud_backend(monkeypatch, cloud):
+    monkeypatch.setattr(VisitorStore, 'from_settings', lambda settings: VisitorStore(cloud))
 
 
 def client_for(settings):
@@ -73,7 +79,7 @@ def test_validation_origins_and_proxy_auth(settings):
         assert client.delete('/api/visitors').status_code == 405
 
 
-def test_network_limit_and_hashes(settings):
+def test_network_limit_and_hashes(settings, cloud):
     with client_for(settings) as client:
         for i in range(6):
             client.cookies.clear()
@@ -81,10 +87,11 @@ def test_network_limit_and_hashes(settings):
             response = client.post('/api/visitors', json={'name': 'Visitor ' + str(i)})
             assert response.status_code == (201 if i < 5 else 429)
         assert int(response.headers['retry-after']) > 0
-    with sqlite3.connect(settings.database) as db:
-        rows = db.execute('SELECT * FROM submission_limits').fetchall()
-        assert len(rows) == 1 and rows[0][1] == 6
-        assert '203.0.113.8' not in str(rows)
+    assert len(cloud.records) == 5
+    assert '203.0.113.8' not in str(cloud.records)
+    with client_for(settings) as restarted:
+        restarted.get('/api/visitors')
+        assert restarted.post('/api/visitors', json={'name': 'After restart'}).status_code == 429
 
 
 def test_moderation_preserves_positions(settings):
@@ -104,13 +111,17 @@ def test_moderation_preserves_positions(settings):
         assert client.patch('/api/visitors', json={**payload, 'hidden': False}, headers={'Authorization': 'Bearer ' + ADMIN}).status_code == 200
 
 
-def test_pagination_and_legacy_database(settings):
+def test_pagination_and_legacy_database(settings, cloud, tmp_path):
     # Start with the old D1 schema/data to verify migration preserves link IDs and dates.
-    with sqlite3.connect(settings.database) as db:
+    source = tmp_path / 'legacy.sqlite3'
+    with sqlite3.connect(source) as db:
         db.executescript((Path(__file__).parents[1] / 'migrations/0001_visitors.sql').read_text())
         for i in range(50):
             ident = str(uuid4())
             db.execute('INSERT INTO visitors(id, name, created_at, visitor_key) VALUES (?, ?, ?, ?)', (ident, 'Visitor ' + str(i), 1789084800000, 'legacy-' + str(i)))
+    from scripts.import_sqlite import import_records
+    assert import_records(source, VisitorStore(cloud)) == 50
+    assert import_records(source, VisitorStore(cloud)) == 0
     with client_for(settings) as client:
         page = client.get('/api/visitors').json()
         assert page['total'] == 50 and len(page['slates']) == 48 and page['lastPage'] == 1
@@ -120,13 +131,32 @@ def test_pagination_and_legacy_database(settings):
         assert linked['createdAt'] == '2026-09-11T00:00:00.000Z'
 
 
-def test_secure_cookies_and_unavailable_storage(settings):
+def test_secure_cookies_and_unavailable_storage(settings, cloud):
     with client_for(replace(settings, production=True, public_origin='https://city.example')) as client:
         response = client.get('/api/visitors')
         assert 'Secure' in response.headers['set-cookie']
         assert 'HttpOnly' in response.headers['set-cookie']
     with client_for(settings) as client:
-        with sqlite3.connect(settings.database) as db:
-            db.execute('DROP TABLE visitors')
-        assert client.get('/api/visitors').status_code == 503
+        cloud.fail = True
+        response = client.get('/api/visitors')
+        assert response.status_code == 503
+        assert 'private SDK' not in response.text
+        assert client.get('/health').status_code == 503
+
+
+def test_ambiguous_write_retry(settings, cloud):
+    with client_for(settings) as client:
+        client.get('/api/visitors')
+        cloud.fail_after_add = True
+        assert client.post('/api/visitors', json={'name': 'Retry'}).status_code == 503
+        retried = client.post('/api/visitors', json={'name': 'Retry'})
+        assert retried.status_code == 200 and retried.json()['existing']
+        assert client.get('/api/visitors').json()['total'] == 1
+
+
+def test_cloud_batch_pagination_and_sequence_order(cloud):
+    for i in reversed(range(650)):
+        cloud.records[str(uuid4())] = {'sequence': i + 1, 'hidden': 0}
+    rows = VisitorStore(cloud).rows()
+    assert [r['sequence'] for r in rows] == list(range(1, 651))
 
