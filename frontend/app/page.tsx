@@ -105,7 +105,7 @@ export default function Home() {
         <div className="header-right">
           <button onClick={() => { setYardOpen(!yardOpen); }}>Visitor yard</button>
           <a className="guide-link" href="/how-it-works">How it works ↗</a>
-          <button onClick={() => { setYardOpen(false); setCredits(true); }}>Credits</button>
+          <button className="guide-link" onClick={() => { setYardOpen(false); setCredits(true); }}>Credits ↗</button>
         </div>
       </header>
       <section className="world" data-pov={pov} aria-label="Explorable ASCII city">

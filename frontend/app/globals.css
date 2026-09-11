@@ -85,7 +85,7 @@ header p {
   letter-spacing: 1px;
 }
 .header-right button {
-  margin-left: 20px;
+  margin-left: 0;
   letter-spacing: 0;
 }
 .live-dot {
@@ -929,4 +929,28 @@ main .camera-controls select {
   .touch-controls { bottom: 266px; }
   .neighborhood-map { bottom: auto; }
   .explanation { bottom: 80px; }
+}
+
+/* Shared spacing and typography for header links and actions. */
+.header-right > :is(button, a) {
+  margin: 0;
+  padding: 9px 12px;
+  font: 14px/1.4 monospace;
+  letter-spacing: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.header-right > :is(button, a):hover {
+  color: #edbe78;
+  text-decoration: underline;
+  text-underline-offset: 6px;
+}
+@media (max-width: 800px) {
+  .header-right > :is(button, a) {
+    font-size: 12px;
+    padding: 8px 6px;
+  }
 }
