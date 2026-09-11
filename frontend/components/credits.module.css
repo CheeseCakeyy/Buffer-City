@@ -1,0 +1,20 @@
+.credits { position:fixed; inset:0; max-width:none; max-height:none; width:100%; height:100dvh; margin:0; padding:0; border:0; background:#000; color:#d9dfc9; overflow:hidden; animation:blackout .45s ease-out both; }
+.credits::backdrop { background:#000; animation:blackout .45s ease-out both; }
+.scene { position:absolute; inset:0; opacity:0; animation:arrive 1.5s .55s ease-out forwards; }
+.closing { animation:leave .45s ease-in forwards; }.closing .scene { animation:leave .35s ease-in forwards; }
+.river { position:absolute; inset:0; width:100%; height:100%; }
+.topline,.bottomline { position:absolute; left:4vw; right:4vw; display:flex; justify-content:space-between; align-items:center; gap:20px; font:10px/1.7 'Courier New',monospace; color:#8da18c; }
+.topline { top:28px; }.bottomline { bottom:25px; }
+.credits button { color:#b8c6ad; font:11px/1.6 'Courier New',monospace; border:1px solid #425748; background:#09140dbb; border-radius:2px; padding:9px 13px; }
+.credits button:hover { color:#f0cb8d; background:#1b2c21; }.credits :is(button,a):focus-visible { outline:2px solid #e2b777; outline-offset:5px; }
+.names { position:absolute; left:59%; top:30%; width:35%; max-width:500px; }
+.eyebrow { margin:0 0 23px; color:#a2b698; font:11px 'Courier New',monospace; letter-spacing:3px; }
+.credits h2 { margin:0; color:#e3c795; font:400 clamp(28px,3.6vw,61px)/1.23 'Courier New',monospace; letter-spacing:-2px; text-shadow:0 3px #0008; }
+.note { font:12px/1.8 'Courier New',monospace; color:#99ae97; max-width:300px; margin:22px 0 35px; }
+.names nav { display:flex; flex-wrap:wrap; gap:16px 25px; font:12px/1.8 'Courier New',monospace; }.names a { color:#d9dec2; text-decoration:none; border-bottom:1px solid #5b7863; padding-bottom:5px; }.names a:hover { color:#efc785; border-color:#efc785; }.pending { color:#8a9e89; }
+.thanks { margin:55px 0 20px; color:#9eb499; font:12px/1.8 'Courier New',monospace; max-width:280px; }.signature { color:#567b65; font:18px monospace; letter-spacing:10px; }
+@keyframes blackout { from { opacity:0; } to { opacity:1; } } @keyframes arrive { to { opacity:1; } } @keyframes leave { from { opacity:1; } to { opacity:0; } }
+@media(max-width:700px) { .topline { top:16px; left:18px; right:18px; }.topline>span { max-width:110px; font-size:9px; }.names { left:12%; top:53%; width:80%; }.credits h2 { font-size:clamp(26px,7vw,42px); letter-spacing:-1px; }.eyebrow { margin-bottom:12px; font-size:9px; }.note { margin:12px 0 20px; font-size:10px; }.thanks { margin:23px 0 8px; font-size:10px; }.signature { font-size:12px; }.bottomline { bottom:14px; left:18px; right:18px; }.names nav { gap:18px; font-size:11px; } }
+@media(max-height:600px) and (min-width:701px) { .names { top:19%; }.credits h2 { font-size:34px; }.thanks { margin-top:22px; }.note { margin:16px 0; } }
+@media(prefers-reduced-motion:reduce) { .credits,.credits::backdrop,.scene { animation:none; opacity:1; }.closing .scene,.closing { animation:none; opacity:0; } }
+@media(max-width:700px) and (max-height:720px) { .names { top:49%; }.credits h2 { font-size:26px; }.thanks { margin-top:15px; }.signature { display:none; }.note { margin:10px 0 13px; } }
