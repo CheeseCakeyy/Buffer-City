@@ -71,7 +71,7 @@ export function BuildingBuilder() {
   const error = invalid ? 'Enter all six coordinates between −30 and 30.' : min.some((n, i) => n >= max[i]) ? 'Each max coordinate must be greater than its matching min.' : min[1] < 0 ? 'Keep min Y at 0 or above so the building is above ground.' : '';
   const drawing = !error ? renderBuilding(min, max) : null;
   return <div className={s.builder}>
-    <div className={s.builderHeading}><span className={s.diagramLabel}>YOUR FIRST ASCII BUILDING</span><span className={s.liveLabel}>● LIVE PREVIEW</span></div>
+    <div className={s.builderHeading}><span className={s.diagramLabel}>building.preview</span><span className={s.liveLabel}>● LIVE</span></div>
     <div className={s.buildingViewport} role="img" aria-label={error ? 'Preview unavailable until coordinates are valid' : `ASCII building from [${min.join(', ')}] to [${max.join(', ')}]`}>
       {drawing ? <pre aria-hidden="true">{drawing.map((line, row) => <span key={row}>{line.map((run, i) => <span key={i} className={run.lit ? s.litWindow : undefined}>{run.text}</span>)}{'\n'}</span>)}</pre> : <p>Set two valid corners<br />to bring your building into view.</p>}
     </div>
