@@ -54,7 +54,7 @@ export default function Home() {
             {
               name: 'recenter_ascii_city',
               description:
-                'Return the player and camera to the southeast Arts Lane crossing by the river.',
+                'Return the player and camera to the south end of Arts Lane by the river.',
               inputSchema: {
                 type: 'object',
                 properties: {},
