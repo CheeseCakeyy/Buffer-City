@@ -345,7 +345,6 @@ export function detailGlyph(
   b: Box,
   world: Vec,
   worldNormal: Vec,
-  night: boolean,
 ): [string, string] {
   const p = b.frame ? toLocal(world, b.frame) : world;
   const n = b.frame ? toLocal(worldNormal, b.frame, true) : worldNormal;
@@ -355,7 +354,6 @@ export function detailGlyph(
   const u = Math.abs(n[0]) > 0.5 ? z : x;
   const v = Math.abs(n[1]) > 0.5 ? z : y;
   const edge = Math.min(u, 1 - u, v, 1 - v) < 0.045;
-  const shade = (day: string, lit: string) => (night ? lit : day);
   switch (b.finish) {
     case 'skin': {
       if (b.feature === 'face' && n[2] < -0.5) {
@@ -364,7 +362,7 @@ export function detailGlyph(
           y < 0.73 &&
           (Math.abs(x - 0.27) < 0.12 || Math.abs(x - 0.73) < 0.12)
         )
-          return ['o', shade('#382c27', '#c7aa8f')];
+          return ['o', '#c7aa8f'];
         if (y > 0.22 && y < 0.3 && x > 0.32 && x < 0.68)
           return ['-', '#704932'];
         if (Math.abs(x - 0.5) < 0.08 && y > 0.36 && y < 0.57)
@@ -375,12 +373,12 @@ export function detailGlyph(
     case 'hair':
       return [
         Math.abs(n[1]) > 0.5 ? '=' : '|',
-        shade(b.tint || '#4a3830', '#9b8671'),
+        '#9b8671',
       ];
     case 'coat':
       if (b.feature === 'jacket' && n[2] < -0.5) {
         if (Math.abs(x - 0.5) < 0.035)
-          return ['|', shade('#e5c49a', '#f0d3a6')];
+          return ['|', '#f0d3a6'];
         if (y > 0.26 && y < 0.33 && (x < 0.3 || x > 0.7))
           return ['_', '#3f4b49'];
         if (y > 0.82 && Math.abs(x - 0.5) < (1 - y) * 1.5)
@@ -397,9 +395,9 @@ export function detailGlyph(
         b.tint || '#a67843',
       ];
     case 'trousers':
-      return [edge ? '|' : ':', shade('#435064', '#8994a4')];
+      return [edge ? '|' : ':', '#8994a4'];
     case 'shoe':
-      return [y < 0.25 ? '=' : '#', shade('#383b3c', '#7f8480')];
+      return [y < 0.25 ? '=' : '#', '#7f8480'];
     case 'paint':
       return [
         edge ? '_' : b.feature === 'bus-body' && y > 0.7 ? '=' : '.',
@@ -407,44 +405,41 @@ export function detailGlyph(
       ];
     case 'glass': {
       if (edge || (b.feature === 'bus-door' && Math.abs(u - 0.5) < 0.04))
-        return ['|', shade('#334443', '#92acac')];
+        return ['|', '#92acac'];
       const glint = mod((u + v * 0.45) * 4, 1) < 0.12;
       return [
         glint ? '/' : ':',
-        shade(glint ? '#829eaa' : '#3e5e6a', glint ? '#bfd7d1' : '#6d9095'),
+        glint ? '#bfd7d1' : '#6d9095',
       ];
     }
     case 'tire': {
       const r = Math.hypot((u - 0.5) * 2, (y - 0.5) * 2);
       return [
         r < 0.42 ? '+' : r < 0.62 ? 'O' : '#',
-        shade(
-          r < 0.62 ? '#888d89' : '#353a3a',
-          r < 0.62 ? '#b7bab0' : '#6c746f',
-        ),
+        r < 0.62 ? '#b7bab0' : '#6c746f',
       ];
     }
     case 'metal':
       return [
         b.feature === 'grille' ? '=' : edge ? '_' : '+',
-        shade('#61665e', '#9ea89b'),
+        '#9ea89b',
       ];
     case 'wood':
       return [
         mod(p[0] * 3 + p[1] * 17 + p[2] * 9, 1) < 0.23 ? '~' : '-',
-        shade('#946a44', '#bea17a'),
+        '#bea17a',
       ];
     case 'door': {
       const panel = x > 0.15 && x < 0.85 && y > 0.09 && y < 0.4;
       return [
         panel ? (x < 0.2 || x > 0.8 ? '|' : '=') : ':',
-        shade('#71533b', '#b09772'),
+        '#b09772',
       ];
     }
     case 'lamp':
-      return ['#', shade('#b7a46b', '#ffe3a0')];
+      return ['#', '#ffe3a0'];
     case 'tail':
-      return ['#', shade('#a14938', '#fa8b5e')];
+      return ['#', '#fa8b5e'];
     case 'display': {
       const col = Math.floor(x * 9),
         row = Math.min(4, Math.floor((1 - y) * 5));
@@ -453,7 +448,7 @@ export function detailGlyph(
         dc = col - (digit ? 5 : 1);
       return [
         dc >= 0 && dc < 3 && digits[digit][row * 3 + dc] === '1' ? '#' : '.',
-        shade('#9d6820', '#ffce79'),
+        '#ffce79',
       ];
     }
     default:

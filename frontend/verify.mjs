@@ -200,8 +200,8 @@ for (const part of renderer.objects) {
   assert.ok(part.min.every((v, i) => Number.isFinite(v) && v < part.max[i]), 'All model parts must have finite positive volume');
   if (part.finish) {
     const p = toWorld(part.min.map((v, i) => (v + part.max[i]) / 2), part.frame);
-    for (const night of [false, true]) {
-      const [glyph, color] = detailGlyph(part, p, [0, 1, 0], night);
+    {
+      const [glyph, color] = detailGlyph(part, p, [0, 1, 0]);
       assert.equal(glyph.length, 1);
       assert.match(color, /^#[0-9a-f]{6}$/i);
     }
@@ -228,7 +228,7 @@ assert.deepEqual(copies[0].slice(1, 5), copies[1].slice(1, 5), 'Repeated glyphs 
 assert.deepEqual(copies[0].slice(5), [7, 17, 11, 15], 'Sprite padding must preserve glyph screen alignment');
 assert.deepEqual(paints[0].transform, [2, 0, 0, 2, 0, 0]);
 atlas.draw(destination, '#', '#ffe3a0', 20, 20);
-assert.equal(paints.length, 2, 'Different day/night colors need distinct sprites');
+assert.equal(paints.length, 2, 'Different glyph colors need distinct sprites');
 assert.equal(paints[1].color, '#ffe3a0');
 for (const dpr of [1, 1.25, 1.5, 2]) {
   const scaled = new GlyphAtlas(5, 9, '9px "Courier New",monospace', dpr);
@@ -238,7 +238,7 @@ for (const dpr of [1, 1.25, 1.5, 2]) {
   assert.equal(copy[3] / copy[7], dpr, 'Atlas source/destination scale must match display density');
 }
 console.log('Glyph atlas reuse, color changes, padding and 1x/1.25x/1.5x/2x display density passed.');
-console.log('Oriented hits, open leg/bench gaps, solid vehicle cabins, and day/night detail materials passed.');
+console.log('Oriented hits, open leg/bench gaps, solid vehicle cabins, and dark detail materials passed.');
 
 // Follow view must stay behind the character, with movement aligned to its
 // forward/right basis at every yaw. These checks catch the former half-turn.
@@ -357,10 +357,13 @@ renderer.simulate(0);
 for (const pov of ['first', 'second', 'third']) {
   renderer.setPOV(pov);
   renderer.lookPitch = pov === 'first' ? 1.35 : 0;
+  let morningColors;
   for (const clock of [540, 1260]) {
     renderer.clock = clock;
     const start = performance.now();
     renderer.render();
+    if (clock === 540) morningColors = [...renderer.colors];
+    else assert.deepEqual(renderer.colors, morningColors, 'The clock must not change the dark palette');
     assert.ok(renderer.glyphs.some(g => g !== ' '), 'A complete frame must contain visible glyphs');
     assert.ok(renderer.depths.every(d => !Number.isNaN(d)));
     assert.ok(renderer.glyphs.every(g => typeof g === 'string' && g.length === 1));

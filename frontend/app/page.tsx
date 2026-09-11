@@ -242,7 +242,7 @@ export default function Home() {
                   Nine distinct blocks share a street grid. Buildings and props
                   are boxes with width, depth and height. Your
                   position changes with input; cars and residents follow looping
-                  routes. A clock controls daylight. These are simple routines,
+                  routes. The clock advances while the city stays dark. These are simple routines,
                   not a full economy or traffic model.
                 </p>
               </li>
@@ -286,8 +286,8 @@ export default function Home() {
                 <h3>04 / Turn the hit into a glyph</h3>
                 <p>
                   The hit position identifies windows, roof edges, paving or
-                  lane markings. The surface normal and sun direction give
-                  brightness using <code>max(0, N · L)</code>. Edges use /, |
+                  lane markings. A fixed dark palette keeps the characters
+                  readable. Edges use /, |
                   and _; surfaces use dots and hatching. Amber marks lit windows
                   and your character.
                 </p>
@@ -363,9 +363,6 @@ export default function Home() {
             }}
           >
             {paused ? '▶ Resume city' : 'Ⅱ Pause city'}
-          </button>
-          <button onClick={() => engine.current?.toggleNight()}>
-            Day / night
           </button>
         </div>
       </footer>

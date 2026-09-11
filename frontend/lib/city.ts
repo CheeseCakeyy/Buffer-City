@@ -467,9 +467,6 @@ export class City {
     this.followDistance = 5.5;
     this.reportAt = 0;
   }
-  toggleNight() {
-    this.clock = this.clock >= 1080 || this.clock < 360 ? 540 : 1260;
-  }
   private blur = () => {
     this.keys.clear();
     this.prev = 0;
@@ -864,11 +861,10 @@ export class City {
     p: Vec,
     _col: number,
     _row: number,
-    night: boolean,
   ): [string, string] {
     const b = hit.box,
       n = hit.normal;
-    let color = night ? '#a7b2a0' : '#41433e',
+    let color = '#a7b2a0',
       glyph = '.';
     if (this.mode === 'depth') {
       const v = Math.max(30, Math.min(210, Math.round(this.perspective ? hit.t * 4 : (hit.t - 110) * 1.4)));
@@ -882,7 +878,7 @@ export class City {
     if (!b) {
       if (p[2] >= YARD.north) {
         const path = Math.abs(p[0]) < 3 || Math.abs(mod(p[2] - 81, 4)) < .6;
-        return [path ? '.' : "'", night ? '#596f62' : path ? '#b2b5a3' : '#88a17e'];
+        return [path ? '.' : "'", '#596f62'];
       }
       const rx = roadDistance(p[0]), rz = roadDistance(p[2]);
       if (rx < 2.4 || rz < 2.4) {
@@ -891,30 +887,30 @@ export class City {
             (rz < .12 && rx > 3 && mod(p[0], 3) < 1.6)) glyph = '-';
         if ((rx < 2.4 && rz > 3 && rz < 4.5) || (rz < 2.4 && rx > 3 && rx < 4.5))
           glyph = mod(rx < 2.4 ? p[0] : p[2], .8) < .38 ? '=' : ' ';
-        return [glyph, night ? '#697567' : '#999a8d'];
+        return [glyph, '#697567'];
       }
       const district = districtAt(p[0], p[2]);
       const x = p[0] - district.x, z = p[2] - district.z;
       const garden = district.id === 'park' || district.id === 'garden';
       if (garden && rx > 4 && rz > 4 && Math.abs(x - z) > 1.1 && Math.abs(x + z) > 1.1) {
-        return [mod(p[0] * 3 + p[2] * 1.7, 1) < .26 ? "'" : '.', night ? '#536d50' : '#90a57b'];
+        return [mod(p[0] * 3 + p[2] * 1.7, 1) < .26 ? "'" : '.', '#536d50'];
       }
       if (district.id === 'foundry' && rx > 4 && rz > 4)
-        return [mod(Math.floor(p[0] * 3) + Math.floor(p[2] * 2), 4) === 0 ? ':' : '.', night ? '#75694b' : '#b4a17c'];
+        return [mod(Math.floor(p[0] * 3) + Math.floor(p[2] * 2), 4) === 0 ? ':' : '.', '#75694b'];
       glyph = mod(p[0], 1) < .09 || mod(p[2], 1) < .09 ? '+' : '.';
-      return [glyph, night ? '#52614e' : '#b6baa7'];
+      return [glyph, '#52614e'];
     }
     if (b.kind === 'foliage')
-      return [['&', '*', '#'][mod(Math.floor(p[0] * 5 + p[1] * 3 + p[2] * 4), 3)], night ? '#608c57' : '#4d844c'];
-    if (b.kind === 'bridge') return [mod(p[2] * 2, 1) < .15 ? '=' : '-', night ? '#b2ae8a' : '#8b8068'];
-    if (b.kind === 'slate-empty') return ['.', night ? '#52625a' : '#b1b7ad'];
+      return [['&', '*', '#'][mod(Math.floor(p[0] * 5 + p[1] * 3 + p[2] * 4), 3)], '#608c57'];
+    if (b.kind === 'bridge') return [mod(p[2] * 2, 1) < .15 ? '=' : '-', '#b2ae8a'];
+    if (b.kind === 'slate-empty') return ['.', '#52625a'];
     if (b.kind === 'visitor-slate' || b.kind === 'visitor-pedestal')
-      return [n[1] ? '=' : ':', b.name === this.selectedName ? (night ? '#efc780' : '#a26930') : (night ? '#9cbab5' : '#678580')];
+      return [n[1] ? '=' : ':', b.name === this.selectedName ? ('#efc780') : ('#9cbab5')];
     if (b.kind === 'river') {
       const wave = mod(p[0] * .85 - this.elapsed * 1.8 + Math.sin(p[2] * 1.7) * .65, 4);
       const lip = p[0] > RIVER.east - .7;
       return [lip ? '=' : wave < .65 ? '~' : wave < 1 ? '-' : '.',
-        lip ? (night ? '#c6eee6' : '#4b939b') : wave < 1 ? (night ? '#80bfbe' : '#468d97') : (night ? '#3d747e' : '#8ab8ba')];
+        lip ? ('#c6eee6') : wave < 1 ? ('#80bfbe') : ('#3d747e')];
     }
     if (b.kind === 'waterfall') {
       // Positive time advances the streak pattern downwards in world space.
@@ -923,35 +919,28 @@ export class City {
       const fade = (RIVER.surface - p[1]) / (RIVER.surface - RIVER.bottom);
       const broken = fade > .65 && mod(lane * 7 + Math.floor(p[1] * 3 + this.elapsed * 8), 9) < (fade - .65) * 20;
       return [broken ? ' ' : fade > .85 ? ':' : streak < 1.2 ? ':' : lane % 3 === 0 ? '|' : '!',
-        fade > .8 ? (night ? '#456969' : '#b2cdcb') : streak < 1.2 ? (night ? '#d0efdf' : '#73b2b8') : (night ? '#75c3c9' : '#428d9d')];
+        fade > .8 ? ('#456969') : streak < 1.2 ? ('#d0efdf') : ('#75c3c9')];
     }
     if (b.kind === 'cliff') {
       const layer = mod(-p[1] + Math.sin(p[0] * .15 + p[2] * .12) * .35, 2.8);
       return [layer < .14 ? '-' : mod(p[0] * 1.9 + p[2] * 2.3 + p[1] * .7, 5) < .35 ? ':' : '.',
-        night ? '#384d48' : '#c2c6ba'];
+        '#384d48'];
     }
     if (b.kind === 'water')
-      return [mod(p[0] * 2 + p[2] * 3, 2) < 1 ? '~' : '-', night ? '#547e88' : '#6d9da4'];
-    if (b.kind === 'clock') return [p[1] > b.max[1] - 2.5 ? 'O' : '|', night ? '#e8c16b' : '#7b817b'];
+      return [mod(p[0] * 2 + p[2] * 3, 2) < 1 ? '~' : '-', '#547e88'];
+    if (b.kind === 'clock') return [p[1] > b.max[1] - 2.5 ? 'O' : '|', '#e8c16b'];
     if (b.feature === 'hazard')
-      return [mod(p[0] * 2 + p[1] * 2, 2) < 1 ? '/' : '#', night ? '#c7ac5f' : '#a18334'];
-    if (b.finish) return detailGlyph(b, p, n, night);
-    if (b.kind === 'player') return [this.pov === 'second' ? (p[1] > 1.3 ? 'o' : '|') : ' ', night ? '#ffc66a' : '#b16b1e'];
+      return [mod(p[0] * 2 + p[1] * 2, 2) < 1 ? '/' : '#', '#c7ac5f'];
+    if (b.finish) return detailGlyph(b, p, n);
+    if (b.kind === 'player') return [this.pov === 'second' ? (p[1] > 1.3 ? 'o' : '|') : ' ', '#ffc66a'];
     if (b.kind === 'person')
-      return [p[1] > 1.1 ? 'o' : '|', night ? '#c2c7b4' : '#455c43'];
+      return [p[1] > 1.1 ? 'o' : '|', '#c2c7b4'];
     if (b.kind === 'car')
-      return [n[1] ? '=' : n[0] ? '|' : '/', night ? '#ced8be' : '#495b44'];
-    if (b.kind === 'sign') return [' ', night ? '#e7b46d' : '#a15a35'];
+      return [n[1] ? '=' : n[0] ? '|' : '/', '#ced8be'];
+    if (b.kind === 'sign') return [' ', '#e7b46d'];
     if (b.kind === 'awning')
-      return [mod(p[0] * 2, 2) < 1 ? '/' : ' ', night ? '#9d8770' : '#8a7a66'];
-    const brightness = Math.max(0, dot(n, [-0.5, 0.8, 0.32]));
-    color = night
-      ? '#7c8b75'
-      : brightness > 0.6
-        ? '#a1a094'
-        : brightness > 0.15
-          ? '#96978a'
-          : '#777b70';
+      return [mod(p[0] * 2, 2) < 1 ? '/' : ' ', '#9d8770'];
+    color = '#7c8b75';
     if (n[1]) {
       const edge = Math.min(
         p[0] - b.min[0],
@@ -965,7 +954,7 @@ export class City {
           : mod(Math.floor(p[0] * 2) + Math.floor(p[2] * 2), 4) === 0
             ? '-'
             : '.';
-      color = night ? '#566650' : '#b8b6a8';
+      color = '#566650';
       if (b.kind === 'roof') glyph = n[1] ? '=' : '|';
     } else {
       const u = n[0] ? p[2] - b.min[2] : p[0] - b.min[0];
@@ -986,7 +975,7 @@ export class City {
       else if (p[1] < 0.2 || b.max[1] - p[1] < 0.15) glyph = '_';
       else if (window) {
         glyph = ' ';
-        if (night && mod(Math.floor(u / 2) + Math.floor(p[1] / 2.7), 3) !== 0) {
+        if (mod(Math.floor(u / 2) + Math.floor(p[1] / 2.7), 3) !== 0) {
           color = '#d6a355';
           glyph = '#';
         }
@@ -994,8 +983,7 @@ export class City {
         glyph =
           mod(Math.floor(u * 3) + Math.floor(p[1] * 3), 3) === 0 ? '.' : ' ';
     }
-    if (b.tint && !night && n[1] === 0 && glyph !== '#') color = b.tint;
-    if (b.name === this.selectedName) color = night ? '#e1b870' : '#9b642d';
+    if (b.name === this.selectedName) color = '#e1b870';
     return [glyph, color];
   }
 
@@ -1023,10 +1011,8 @@ export class City {
     this.depths.fill(Infinity);
     this.priorities.fill(0);
     this.glyphs.fill(' ');
-    const ctx = this.ctx,
-      night = this.clock > 1080 || this.clock < 360;
-    this.canvas.dataset.night = String(night);
-    ctx.fillStyle = night ? '#18221d' : '#faf9f5';
+    const ctx = this.ctx;
+    ctx.fillStyle = '#18221d';
     ctx.fillRect(0, 0, this.width, this.height);
     ctx.font = '9px "Courier New",monospace';
     ctx.textBaseline = 'top';
@@ -1054,11 +1040,11 @@ export class City {
         hitPoint[0] = origin[0] + direction[0] * hit.t;
         hitPoint[1] = origin[1] + direction[1] * hit.t;
         hitPoint[2] = origin[2] + direction[2] * hit.t;
-        const [g, color] = this.glyph(hit, hitPoint, col, row, night);
+        const [g, color] = this.glyph(hit, hitPoint, col, row);
         if (g !== ' ') this.stamp(col, row, g, color);
       }
     }
-    if (this.mode === 'ink') this.drawDetails(night);
+    if (this.mode === 'ink') this.drawDetails();
     // Draw each cell once. Overlapping line samples no longer build X-shaped ink blobs.
     const x = Math.round(this.gridX * this.dpr) / this.dpr,
       y = Math.round(this.gridY * this.dpr) / this.dpr;
@@ -1069,10 +1055,10 @@ export class City {
         if (this.glyphs[i] === ' ') continue;
         this.atlas.draw(ctx, this.glyphs[i], this.colors[i], x + col * this.cw, y + row * this.ch);
       }
-    if (this.mode === 'ink' && this.perspective) this.drawShopSigns(night);
-    if (this.mode === 'ink') this.drawSlateInscriptions(night);
-    this.drawPlayer(night);
-    this.drawMap(night);
+    if (this.mode === 'ink' && this.perspective) this.drawShopSigns();
+    if (this.mode === 'ink') this.drawSlateInscriptions();
+    this.drawPlayer();
+    this.drawMap();
   }
   private project(p: Vec): [number, number, number] {
     const x = p[0] - this.center[0], y = p[1] - this.center[1], z = p[2] - this.center[2];
@@ -1156,7 +1142,7 @@ export class City {
         this.stamp(c, r, text[i], color, 5);
     }
   }
-  private drawShopSigns(night: boolean) {
+  private drawShopSigns() {
     const ctx = this.ctx;
     for (const b of this.objects) {
       if (b.kind !== 'sign' || !this.visibleObjects?.has(b)) continue;
@@ -1167,7 +1153,7 @@ export class City {
       ctx.save();
       ctx.font = 'bold ' + size + 'px "Courier New", monospace';
       ctx.textBaseline = 'top';
-      ctx.fillStyle = night ? '#ffd18a' : '#88421f';
+      ctx.fillStyle = '#ffd18a';
       for (let i = 0; i < b.name.length; i++) {
         const f = i / b.name.length;
         const p = this.project([(b.min[0] + b.max[0]) / 2,
@@ -1187,9 +1173,9 @@ export class City {
       ctx.restore();
     }
   }
-  private drawDetails(night: boolean) {
-    const ink = night ? '#bfbdad' : '#282824',
-      faint = night ? '#647166' : '#929286';
+  private drawDetails() {
+    const ink = '#bfbdad',
+      faint = '#647166';
     for (const b of this.objects) {
       // Model surfaces carry their own local details. Outlining every small part
       // would fill the spaces between limbs, wheels, and bench slats with ink.
@@ -1204,7 +1190,7 @@ export class City {
         this.label(
           b.name,
           [b.min[0] + 0.25, b.max[1] - 0.45, b.max[2] + 0.05],
-          night ? '#e7b46d' : '#8a4b2d',
+          '#e7b46d',
           true,
         );
         continue;
@@ -1318,7 +1304,7 @@ export class City {
       if ((x - this.player[0]) ** 2 + (z - this.player[2]) ** 2 > 35 ** 2) continue;
       this.line([x, 0, z], [x, 3.7, z], ink);
       this.line([x, 3.7, z], [x + .7, 3.7, z], ink);
-      this.label('*', [x + .7, 3.7, z], night ? '#e3b864' : ink);
+      this.label('*', [x + .7, 3.7, z], '#e3b864');
     }
     // A small deterministic spray cloud disperses beyond the falling sheet.
     // World-space labels use the same depth buffer as the rest of the drawing.
@@ -1328,19 +1314,19 @@ export class City {
         RIVER.east + .7 + phase * 4 + Math.sin(i * 2.4) * .4,
         RIVER.bottom + 3 - phase * 4 + Math.sin(i * 1.8),
         RIVER.north + mod(i * 2.71, 10) + Math.sin(i * 3.1) * phase * 2,
-      ], night ? '#517c7b' : '#a9c7c7');
+      ], '#517c7b');
     }
     // Sparse route markers sit on the ground and obey the depth buffer.
     for (let i = 0; i < this.path.length; i += 6) {
       const p = this.path[i];
-      this.label('.', [p[0], .08, p[2]], night ? '#ffc16f' : '#b35325');
+      this.label('.', [p[0], .08, p[2]], '#ffc16f');
     }
     if (this.path.length) {
       const dest = this.path[this.path.length - 1];
       this.label('+', [dest[0], 0.1, dest[2]], '#bb642c');
     }
   }
-  private drawSlateInscriptions(night: boolean) {
+  private drawSlateInscriptions() {
     const ctx = this.ctx;
     for (const b of this.slateBoxes ?? []) {
       if (!this.visibleObjects?.has(b)) continue;
@@ -1371,7 +1357,7 @@ export class City {
       ctx.beginPath(); ctx.moveTo(a[0], a[1]);
       for (const p of corners.slice(1)) ctx.lineTo(p[0], p[1]);
       ctx.closePath(); ctx.clip();
-      ctx.fillStyle = night ? '#385047' : '#dce3d9';
+      ctx.fillStyle = '#385047';
       ctx.fill();
       // Affine text coordinates follow the stone's top face; the projected center
       // is used as the origin so full names stay centered at every camera angle.
@@ -1385,18 +1371,18 @@ export class City {
       const fontSize = Math.min(108, 520 / (maxLength * .63), 220 / (lines.length * 1.2));
       ctx.font = `bold ${fontSize}px "Courier New", monospace`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = b.name === this.selectedName ? (night ? '#f5d99c' : '#6c4828') : (night ? '#e3eee2' : '#34483b');
+      ctx.fillStyle = b.name === this.selectedName ? ('#f5d99c') : ('#e3eee2');
       lines.forEach((line, i) => ctx.fillText(line, 0, (i - (lines.length - 1) / 2) * fontSize * 1.2, 540));
       ctx.restore();
     }
   }
-  private drawPlayer(night: boolean) {
+  private drawPlayer() {
     if (this.perspective) return;
     const p = this.project([this.player[0], this.player[1] + 1.2, this.player[2]]),
-      ink = night ? '#ffc16f' : '#b35325';
+      ink = '#ffc16f';
     const ctx = this.ctx;
     ctx.font = 'bold 17px "Courier New",monospace';
-    ctx.fillStyle = night ? '#18221de8' : '#faf9f5e8';
+    ctx.fillStyle = '#18221de8';
     ctx.fillRect(p[0] - 7, p[1] - 5, 16, 21);
     ctx.fillStyle = ink;
     ctx.fillText('@', Math.round(p[0] - 5), Math.round(p[1] - 4));
@@ -1408,7 +1394,7 @@ export class City {
     this.mapCanvas = canvas;
     canvas.addEventListener('click', this.mapClick);
   }
-  private drawMap(night: boolean) {
+  private drawMap() {
     const canvas = this.mapCanvas, ctx = canvas?.getContext('2d');
     if (!ctx || !canvas) return;
     const size = canvas.width, scale = (size - 8) / (MAP_LIMIT * 2), mid = size / 2;
@@ -1421,33 +1407,33 @@ export class City {
       ctx.fillRect(px(d.x - 19), px(d.z - 19), 38 * scale, 38 * scale);
     }
     ctx.globalAlpha = 1;
-    ctx.fillStyle = night ? '#34584c' : '#c2d1bd';
+    ctx.fillStyle = '#34584c';
     ctx.fillRect(px(YARD.west), px(YARD.north), (YARD.east - YARD.west) * scale, (YARD.south - YARD.north) * scale);
-    ctx.fillStyle = night ? '#647160' : '#bbbcae';
+    ctx.fillStyle = '#647160';
     for (const b of this.fixed) ctx.fillRect(px(b.min[0]), px(b.min[2]),
       (b.max[0] - b.min[0]) * scale, (b.max[2] - b.min[2]) * scale);
-    ctx.fillStyle = night ? '#549aab' : '#78aeb6';
+    ctx.fillStyle = '#549aab';
     ctx.fillRect(px(RIVER.west), px(RIVER.north), (RIVER.east - RIVER.west) * scale, (RIVER.south - RIVER.north) * scale);
-    ctx.fillStyle = night ? '#b9e7e0' : '#3e818e';
+    ctx.fillStyle = '#b9e7e0';
     ctx.fillRect(px(RIVER.east) - 1, px(RIVER.north), 2, (RIVER.south - RIVER.north) * scale);
-    ctx.fillStyle = night ? '#b2ae8a' : '#8b8068';
+    ctx.fillStyle = '#b2ae8a';
     ctx.fillRect(px(-3), px(64), 6 * scale, 14 * scale);
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const d of [...DISTRICTS, VISITOR_DISTRICT]) {
-      ctx.fillStyle = night ? '#19231ded' : '#faf9f5e8';
+      ctx.fillStyle = '#19231ded';
       ctx.fillRect(px(d.x) - 9, px(d.z) - 6, 18, 12);
-      ctx.fillStyle = night ? '#d2d4bd' : '#51564a';
+      ctx.fillStyle = '#d2d4bd';
       ctx.fillText(d.code, px(d.x), px(d.z));
     }
-    ctx.strokeStyle = night ? '#ffc16f' : '#b35325'; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#ffc16f'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(px(this.player[0]), px(this.player[2]));
     for (const p of this.path) ctx.lineTo(px(p[0]), px(p[2]));
     ctx.stroke();
     const x = px(this.player[0]), z = px(this.player[2]);
     ctx.beginPath(); ctx.moveTo(x, z);
     ctx.lineTo(x - Math.sin(this.angle) * 9, z - Math.cos(this.angle) * 9); ctx.stroke();
-    ctx.fillStyle = night ? '#ffc16f' : '#b35325';
+    ctx.fillStyle = '#ffc16f';
     ctx.beginPath(); ctx.arc(x, z, 2.8, 0, Math.PI * 2); ctx.fill();
   }
   private mapClick = (event: MouseEvent) => {
