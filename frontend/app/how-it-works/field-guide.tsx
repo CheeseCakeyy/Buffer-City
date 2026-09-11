@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { DISTRICTS } from '../../lib/city-world';
 import s from './guide.module.css';
+import { BuildingBuilder } from './building-builder';
 
 const chapters = ['A world of boxes', 'A screen of cells', 'First hit wins', 'The moving camera', 'From 3D to 2D', 'One frame at a time'];
 const glyphs = [['_', 'Roof edge', 'A hit close to a horizontal roof boundary.'], ['|', 'Wall edge', 'A hit near the vertical end of a wall.'], ['#', 'Lit window', 'A window bay chosen to glow amber.'], ['~', 'Water', 'A repeating pattern sampled on a water surface.'], ['&', 'Foliage', 'Leaf patterns sampled from the tree canopy.'], ['o', 'A person', 'A small character used for a pedestrian’s head.']];
@@ -35,17 +36,7 @@ export function FieldGuide() {
     <nav className={s.topbar} aria-label="Page navigation"><a href="/" className={s.wordmark}>ascii city <span>/ field notes</span></a><a href="/" className={s.back}>↖ Back to the city</a></nav>
     <div className={s.hero}>
       <div><p className={s.kicker}>FIELD GUIDE 001 · UNDER THE CHARACTERS</p><h1>A real world.<br />A <em>text</em> lens.</h1><p className={s.lede}>A tiny city, drawn with a typewriter. Follow one character all the way from a box in 3D space to a mark on your screen.</p><a className={s.start} href="#chapter-1">Take it apart <span>↓</span></a></div>
-      <div className={s.heroDrawing} aria-label="An ASCII illustration of a city building"><span className={s.diagramLabel}>THE WORLD, THROUGH A CHARACTER GRID</span><pre aria-hidden="true">{`            .__________.
-           /__________/|
-          |  ##  ##  | |
-     _____|  ##  ##  | |
-    /____/|          | |
-   | ## | |  ##  ##  | |
-   |    | |__________|/
-   |____|/   .  .  .
- . . . .  @  . . . . .
-========     ==========
- . . . . . . . . . . .`}</pre><div className={s.drawingCaption}><span>3 dimensions</span><span>1 character per cell</span></div></div>
+      <BuildingBuilder />
     </div>
     <div className={s.layout}>
       <aside className={s.contents}><p className={s.kicker}>IN THIS GUIDE</p>{chapters.map((c, i) => <a key={c} href={`#chapter-${i + 1}`}><span>0{i + 1}</span>{c}</a>)}<div className={s.marginNote}>Start with the pictures.<br />Open “The maths” whenever you want to go deeper.</div></aside>
