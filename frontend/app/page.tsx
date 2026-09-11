@@ -3,12 +3,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { City, type CityStats } from '../lib/city';
 import { DISTRICTS, VISITOR_DISTRICT, SPAWN_POSITION } from '../lib/city-world';
 import { VisitorYard } from '../components/visitor-yard';
+import { Credits } from '../components/credits';
 import type { VisitorSlate } from '../lib/visitor-types';
 export default function Home() {
   const map = useRef<HTMLCanvasElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null),
     engine = useRef<City | null>(null);
-  const [panel, setPanel] = useState(false),
+  const [credits, setCredits] = useState(false),
     [paused, setPaused] = useState(false),
     [mode, setMode] = useState('ink');
   const [yardOpen, setYardOpen] = useState(false);
@@ -84,11 +85,13 @@ export default function Home() {
   }, [selectSlate]);
   useEffect(() => {
     if (engine.current) {
-      engine.current.paused = paused;
+      engine.current.paused = paused || credits;
+      if (credits) engine.current.keys.clear();
       engine.current.mode = mode;
     }
-  }, [paused, mode]);
+  }, [paused, mode, credits]);
   return (
+    <>
     <main>
       <header>
         <div className="brand">
@@ -102,6 +105,7 @@ export default function Home() {
         <div className="header-right">
           <button onClick={() => { setYardOpen(!yardOpen); }}>Visitor yard</button>
           <a className="guide-link" href="/how-it-works">How it works ↗</a>
+          <button onClick={() => { setYardOpen(false); setCredits(true); }}>Credits</button>
         </div>
       </header>
       <section className="world" data-pov={pov} aria-label="Explorable ASCII city">
@@ -246,5 +250,7 @@ export default function Home() {
         </div>
       </footer>
     </main>
+    {credits && <Credits onClose={() => setCredits(false)} />}
+    </>
   );
 }
