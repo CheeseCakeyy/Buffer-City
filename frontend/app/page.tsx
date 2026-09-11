@@ -14,7 +14,7 @@ export default function Home() {
   const [yardOpen, setYardOpen] = useState(false);
   const [slate, setSlate] = useState<VisitorSlate | null>(null);
   const selectSlate = useCallback((selected: VisitorSlate | null) => {
-    setSlate(selected); setYardOpen(true); setPanel(false);
+    setSlate(selected); setYardOpen(true);
   }, []);
   const [stats, setStats] = useState<CityStats>({
     time: '09:00',
@@ -100,8 +100,8 @@ export default function Home() {
           </div>
         </div>
         <div className="header-right">
-          <button onClick={() => { setYardOpen(!yardOpen); setPanel(false); }}>Visitor yard</button>
-          <button aria-expanded={panel} aria-controls="city-explanation" onClick={() => { setPanel(!panel); setYardOpen(false); }}>How it works ↗</button>
+          <button onClick={() => { setYardOpen(!yardOpen); }}>Visitor yard</button>
+          <a className="guide-link" href="/how-it-works">How it works ↗</a>
         </div>
       </header>
       <section className="world" data-pov={pov} aria-label="Explorable ASCII city">
@@ -216,133 +216,7 @@ export default function Home() {
             </button>
           ))}
         </div>
-        {panel && (
-          <aside className="explanation" id="city-explanation">
-            <div className="panel-title">
-              <span className="eyebrow">UNDER THE CHARACTERS</span>
-              <button
-                onClick={() => setPanel(false)}
-                aria-label="Close explanation"
-              >
-                ×
-              </button>
-            </div>
-            <h2>
-              A real world.
-              <br />A text lens.
-            </h2>
-            <p>
-              The city exists as 3D coordinates. ASCII is how we draw it, not
-              how we store it.
-            </p>
-            <ol>
-              <li>
-                <h3>01 / Simulate the world</h3>
-                <p>
-                  Nine distinct blocks share a street grid. Buildings and props
-                  are boxes with width, depth and height. Your
-                  position changes with input; cars and residents follow looping
-                  routes. The clock advances while the city stays dark. These are simple routines,
-                  not a full economy or traffic model.
-                </p>
-              </li>
-              <li>
-                <h3>02 / Choose a camera</h3>
-                <p>
-                  First person places a perspective camera at eye height. Follow
-                  behind places it above and behind your character: W moves
-                  forward, S moves backward, and A / D sidestep left and right.
-                  Drag to turn or adjust the camera height; scroll to change its
-                  distance. It pulls closer near walls. Perspective rays fan
-                  outward and objects shrink with distance. The city drawing
-                  keeps parallel rays.
-                </p>
-                <p>
-                  Street view looks down at 27°, with a closer camera with a
-                  three-unit dead zone. Small movements leave the drawing still;
-                  walking farther brings the camera along. Whole city switches
-                  to a 35.3° overview. Parallel rays keep far buildings the same
-                  size as near ones. Q / E rotates the view; zoom changes the
-                  area each cell covers. Choose a neighborhood or click its map
-                  tile to follow a walking route; WASD takes over at any time.
-                </p>
-              </li>
-              <li>
-                <h3>03 / Cast one ray per cell</h3>
-                <p>
-                  Imagine graph paper in front of the camera. From the center of
-                  every cell, send a line into the scene:{' '}
-                  <code>P(t) = O + tD</code>. O is the starting point and D is
-                  the ray direction. The drawing uses parallel rays; perspective
-                  rays spread out from a shared camera position.
-                </p>
-                <p>
-                  Intersect the ray with building boxes and the ground, then
-                  choose the closest positive hit. This is why a façade hides
-                  the street behind it.
-                </p>
-              </li>
-              <li>
-                <h3>04 / Turn the hit into a glyph</h3>
-                <p>
-                  The hit position identifies windows, roof edges, paving or
-                  lane markings. A fixed dark palette keeps the characters
-                  readable. Edges use /, |
-                  and _; surfaces use dots and hatching. Amber marks lit windows
-                  and your character.
-                </p>
-              </li>
-              <li>
-                <h3>05 / Draw, then repeat</h3>
-                <p>
-                  A world-anchored sampling grid travels with the drawing as the
-                  camera pans. Each cell resolves to one final glyph, preventing
-                  overlapping strokes and reducing movement shimmer. The canvas
-                  draws the surface glyphs, then projects window frames, roof
-                  rails, signs and curb lines into the same character grid. Each
-                  line sample checks its depth against the ray buffer, so it
-                  disappears behind nearer walls. This is CPU raycasting, not a
-                  3D image passed through a text filter. This version has no
-                  secondary reflection rays or cast-shadow rays.
-                </p>
-              </li>
-            </ol>
-            <p className="render-stats">
-              {stats.cells.toLocaleString()} cells · {stats.fps} frames / second
-            </p>
-            <div className="experiment">
-              <h3>See the intermediate information</h3>
-              <div className="segmented">
-                {['ink', 'depth', 'normals'].map((m) => (
-                  <button
-                    className={mode === m ? 'active' : ''}
-                    key={m}
-                    onClick={() => {
-                      setMode(m);
-                      if (engine.current) engine.current.mode = m;
-                    }}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-              <p>
-                {mode === 'depth'
-                  ? 'Depth: nearer hits are darker. This distance resolves visibility.'
-                  : mode === 'normals'
-                    ? 'Normals: colors distinguish roofs, X-facing walls and Z-facing walls. Shading uses these surface directions.'
-                    : 'Ink: surface details and lighting become architectural character patterns.'}
-              </p>
-            </div>
-            <p>
-              Clicking a street casts one picking ray, then searches a half-unit
-              walkable grid using breadth-first search. You follow the route
-              around buildings; WASD cancels it. Dragging orbits the camera. The
-              amber player marker deliberately stays visible through walls so
-              you never lose your position.
-            </p>
-          </aside>
-        )}
+
       </section>
       <footer>
         <div>
@@ -352,6 +226,11 @@ export default function Home() {
           <span className="key">SCROLL</span> {pov === 'second' ? 'Camera distance' : 'Zoom'}
         </div>
         <div className="footer-actions">
+          <select className="render-mode" aria-label="Render information" value={mode} onChange={e => setMode(e.target.value)}>
+            <option value="ink">Ink</option>
+            <option value="depth">Depth</option>
+            <option value="normals">Normals</option>
+          </select>
           <span>
             {stats.cells.toLocaleString()} rays / frame · {stats.fps} fps
           </span>
