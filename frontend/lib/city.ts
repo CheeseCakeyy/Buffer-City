@@ -5,6 +5,7 @@ import { WalkingGrid } from './walking-grid';
 import type { Finish, Frame } from './street-details';
 import { GlyphAtlas } from './glyph-atlas';
 import { inscriptionLines } from './slate-inscription';
+import { SPAWN_POSITION } from './city-world';
 
 export type Vec = [number, number, number];
 export type Box = {
@@ -281,7 +282,7 @@ export class City {
   private ch = 9;
   private angle = (28 * Math.PI) / 180;
   private span = 45;
-  private player: Vec = [0, 0, 18];
+  private player: Vec = [...SPAWN_POSITION];
   private clock = 540;
   private elapsed = 0;
   private gait = 0;
@@ -313,7 +314,7 @@ export class City {
     this.reportAt = 0;
   }
   private observer: ResizeObserver;
-  private focus: Vec = [0, 0, 15];
+  private focus: Vec = [...SPAWN_POSITION];
   private path: Vec[] = [];
   private drag: { x: number; y: number; moved: boolean } | null = null;
   private depths = new Float32Array(0);
@@ -445,12 +446,12 @@ export class City {
     this.span = Math.max(28, Math.min(240, this.span * n));
   }
   reset() {
-    this.player = [0, 0, 18];
+    this.player = [...SPAWN_POSITION];
     this.angle = (28 * Math.PI) / 180;
     this.span = 45;
     this.overview = false;
     this.path = [];
-    this.focus = [0, 0, 15];
+    this.focus = [...SPAWN_POSITION];
     this.restoreLens();
     this.keys.clear();
   }

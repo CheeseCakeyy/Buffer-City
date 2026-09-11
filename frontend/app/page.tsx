@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { City, type CityStats } from '../lib/city';
-import { DISTRICTS, VISITOR_DISTRICT } from '../lib/city-world';
+import { DISTRICTS, VISITOR_DISTRICT, SPAWN_POSITION } from '../lib/city-world';
 import { VisitorYard } from '../components/visitor-yard';
 import type { VisitorSlate } from '../lib/visitor-types';
 export default function Home() {
@@ -53,7 +53,7 @@ export default function Home() {
             {
               name: 'recenter_ascii_city',
               description:
-                'Return the player and camera to the starting crossing.',
+                'Return the player and camera to the southeast Arts Lane crossing by the river.',
               inputSchema: {
                 type: 'object',
                 properties: {},
@@ -68,7 +68,7 @@ export default function Home() {
                 )
                   throw new Error('Expected an empty object');
                 city.reset();
-                return { position: [0, 0, 18], view: 'default' };
+                return { position: [...SPAWN_POSITION], view: 'default' };
               },
             },
             { signal: lifecycle.signal },
@@ -116,8 +116,8 @@ export default function Home() {
           <strong>{stats.time}</strong>
         </div>
         <div className="district-navigation">
-          <span className="eyebrow">{stats.identity ?? 'Mixed use'} · 3 × 3 CITY</span>
-          <strong>{stats.district ?? 'Maple Street'}</strong>
+          <span className="eyebrow">{stats.identity ?? 'Arts & cafés'} · 3 × 3 CITY</span>
+          <strong>{stats.district ?? 'Arts Lane'}</strong>
           <select aria-label="Walk to a neighborhood" value="" onChange={e => {
             engine.current?.visitDistrict(e.target.value);
             canvas.current?.focus({ preventScroll: true });

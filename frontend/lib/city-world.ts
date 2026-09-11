@@ -3,6 +3,8 @@ import { benchModel, doorModels, vehicleModel } from './street-details';
 
 export const BLOCK_SIZE = 42;
 export const WORLD_LIMIT = 66;
+// Southeast crossing at Arts Lane, just north of the river.
+export const SPAWN_POSITION: Vec = [63, 0, 63];
 export const RIVER = { west: -66, east: 66, north: 66, south: 76, surface: .12, bottom: -22 };
 export const MAP_LIMIT = 112;
 export const YARD = { west: -24, east: 24, north: 76, south: 108 };
