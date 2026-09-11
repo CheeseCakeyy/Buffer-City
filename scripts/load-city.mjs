@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 export function cityModuleLoader(reference = false) {
   const cache = new Map();
   return function load(file) {
+    if (!reference && !fs.existsSync(file)) file = 'frontend/' + file;
     if (cache.has(file)) return cache.get(file);
     const source = reference
       ? execFileSync('git', ['show', 'HEAD:' + file], { encoding: 'utf8' })

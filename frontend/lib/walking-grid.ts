@@ -1,17 +1,17 @@
 import type { Box, Vec } from './city';
-import { WORLD_LIMIT } from './city-world';
+import { MAP_LIMIT, walkableGround } from './city-world';
 
 // Half-unit cells, four-way travel, and the same .35-unit body clearance as WASD.
 // Paint obstacles once instead of testing every building at every BFS expansion.
 export class WalkingGrid {
-  private half = WORLD_LIMIT * 2;
+  private half = MAP_LIMIT * 2;
   private size = this.half * 2 + 1;
   private blocked = new Uint8Array(this.size * this.size);
   private parents = new Int32Array(this.blocked.length);
   private queue = new Int32Array(this.blocked.length);
   constructor(readonly boxes: Box[]) {
     for (let z = 0; z < this.size; z++) for (let x = 0; x < this.size; x++)
-      if (x <= 2 || z <= 2 || x >= this.size - 3 || z >= this.size - 3) this.blocked[z * this.size + x] = 1;
+      if (!walkableGround((x - this.half) / 2, (z - this.half) / 2)) this.blocked[z * this.size + x] = 1;
     for (const b of boxes) {
       if (b.min[1] >= 1.6) continue;
       const left = Math.max(0, Math.floor((b.min[0] - .35) * 2 + this.half) + 1);

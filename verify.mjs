@@ -4,7 +4,7 @@ const load = cityModuleLoader();
 const detailUrl = load('lib/street-details.ts'), atlasUrl = load('lib/glyph-atlas.ts');
 const cityUrl = load('lib/city.ts');
 const { intersectBox, canWalk, buildings, cityWorld } = await import(cityUrl);
-const { DISTRICTS, districtAt, districtDestination, WORLD_LIMIT, roadDistance } = await import(load('lib/city-world.ts'));
+const { DISTRICTS, VISITOR_DISTRICT, slatePosition, districtAt, districtDestination, WORLD_LIMIT, roadDistance } = await import(load('lib/city-world.ts'));
 const b = { min: [0, 0, 0], max: [2, 2, 2], name: 'test', kind: 'building' };
 assert.equal(intersectBox([1, 1, 5], [0, 0, -1], b).t, 3);
 assert.deepEqual(intersectBox([1, 1, 5], [0, 0, -1], b).normal, [0, 0, 1]);
@@ -377,7 +377,7 @@ for (const pov of ['first', 'second', 'third']) {
 
 // Check the new districts and the full overview, not just the original crossing.
 renderer.mapCanvas = { width: 180, getContext: () => renderer.ctx };
-for (const d of DISTRICTS) for (const pov of ['first', 'second', 'third']) {
+for (const d of [...DISTRICTS, VISITOR_DISTRICT]) for (const pov of ['first', 'second', 'third']) {
   renderer.player = districtDestination(d);
   renderer.setPOV(pov);
   renderer.angle = .7; renderer.lookPitch = .12;
@@ -391,7 +391,7 @@ for (const d of DISTRICTS) for (const pov of ['first', 'second', 'third']) {
   }
 }
 renderer.setOverview(); renderer.simulate(0); renderer.render();
-assert.ok(renderer.objects.length < 350, 'The overview must use coarse models, not thousands of door and actor parts');
+assert.ok(renderer.objects.length < 460, 'The overview must use coarse models, including the visitor yard');
 for (const d of DISTRICTS) {
   const p = renderer.project([d.x, 0, d.z]);
   assert.ok(p[0] > 0 && p[0] < renderer.width && p[1] > 0 && p[1] < renderer.height);
@@ -402,9 +402,20 @@ console.log('All nine districts rendered in all three views; map drawing, screen
 const river = renderer.objects.find(b => b.kind === 'river');
 const falls = renderer.objects.find(b => b.kind === 'waterfall');
 assert.ok(river && falls);
-assert.equal(renderer.trace([0, 10, 71], -1, -1, [0, -1, 0]).box, river);
+assert.equal(renderer.trace([10, 10, 71], -1, -1, [0, -1, 0]).box, river);
 assert.equal(renderer.trace([80, -10, 71], -1, -1, [-1, 0, 0]).box, falls);
-assert.equal(canWalk(0, 71, renderer.fixed), false);
+assert.equal(canWalk(10, 71, renderer.fixed), false);
+assert.equal(canWalk(0, 71, renderer.fixed), true);
+renderer.player = [0, 0, 63];
+assert.ok(renderer.visitDistrict('visitors'), 'A route must cross the bridge to the visitor yard');
+assert.ok(renderer.path.some(p => p[2] > 66 && p[2] < 76));
+for (const point of renderer.path) {
+  assert.ok(canWalk(point[0], point[2], renderer.fixed));
+  if (point[2] > 66 && point[2] < 76) assert.ok(Math.abs(point[0]) < 2.6, 'Paths cannot cut through the river');
+}
+assert.equal(canWalk(25, 90, renderer.fixed), false, 'Visitors cannot walk off the island');
+assert.equal(canWalk(0, 110, renderer.fixed), false);
+renderer.path = [];
 for (const angle of [0, .49, 1.57, 2.8, 4, 5.5]) {
   renderer.angle = angle; renderer.camera();
   for (const point of [[-66, .12, 76], [66, .12, 76], [71, -24, 78]]) {
@@ -422,6 +433,21 @@ const frozenWater = sampleWater();
 renderer.paused = true; renderer.simulate(.4);
 assert.deepEqual(sampleWater(), frozenWater, 'Pausing the city must freeze the current');
 console.log('River visibility, below-ground waterfall hits, overview framing and animated/paused current passed.');
+const testSlates = Array.from({ length: 48 }, (_, slot) => ({ id: `slate-${slot}`, slot, page: 0, name: `Guest ${slot}`, createdAt: '2026-09-11T00:00:00.000Z' }));
+renderer.setVisitorSlates(testSlates);
+renderer.player = [0, 0, 82]; renderer.path = []; renderer.simulate(0);
+for (const slate of testSlates) {
+  const [x, , z] = slatePosition(slate.slot);
+  assert.equal(renderer.trace([x, 8, z], -1, -1, [0, -1, 0]).box.feature, slate.id, 'Each record must have a pickable stone');
+  renderer.focusVisitor(slate);
+  assert.ok(renderer.path.length > 0, 'Every stone must have a reachable inspection spot');
+  assert.ok(renderer.path.every(p => canWalk(p[0], p[2], renderer.fixed)));
+}
+renderer.path = []; renderer.player = [0, 0, 71]; renderer.simulate(0); renderer.setPOV('first'); renderer.camera();
+assert.equal(renderer.player[1], .35);
+assert.equal(renderer.center[1], 2, 'The first-person eye must rise onto the bridge deck');
+renderer.setVisitorSlates([]);
+console.log('Visitor yard rendered in all POVs; all 48 slate positions are pickable and reachable; bridge camera height passed.');
 renderer.setPOV('first'); renderer.setPOV('third');
 assert.equal(renderer.overview, false);
 assert.equal(renderer.span, 45, 'Leaving the overview through the camera menu must restore the street zoom');

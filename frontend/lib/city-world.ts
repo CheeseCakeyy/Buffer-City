@@ -4,7 +4,22 @@ import { benchModel, doorModels, vehicleModel } from './street-details';
 export const BLOCK_SIZE = 42;
 export const WORLD_LIMIT = 66;
 export const RIVER = { west: -66, east: 66, north: 66, south: 76, surface: .12, bottom: -22 };
-export const MAP_LIMIT = 80;
+export const MAP_LIMIT = 112;
+export const YARD = { west: -24, east: 24, north: 76, south: 108 };
+export const VISITOR_DISTRICT: District = { id: 'visitors', name: 'Visitor Yard', identity: 'Across the river', code: 'VY', x: 0, z: 86, color: '#6f9592', description: 'A garden of names left by people who crossed the bridge.' };
+export function hasGround(x: number, z: number) {
+  return (Math.abs(x) < WORLD_LIMIT && Math.abs(z) < WORLD_LIMIT) ||
+    (Math.abs(x) <= 3 && z >= 64 && z <= 78) ||
+    (x >= YARD.west && x <= YARD.east && z >= YARD.north && z <= YARD.south);
+}
+export function walkableGround(x: number, z: number) {
+  return (Math.abs(x) < WORLD_LIMIT - 1 && Math.abs(z) < WORLD_LIMIT - 1) ||
+    (Math.abs(x) < 2.6 && z > 64 && z < 79) ||
+    (x > YARD.west + .5 && x < YARD.east - .5 && z > YARD.north + .5 && z < YARD.south - .5);
+}
+export function groundHeight(x: number, z: number) {
+  return Math.abs(x) <= 3 && z >= 64 && z <= 78 ? .35 : 0;
+}
 export type District = {
   id: string; name: string; identity: string; code: string;
   x: number; z: number; color: string; description: string;
@@ -21,11 +36,12 @@ export const DISTRICTS: District[] = [
   { id: 'arts', name: 'Arts Lane', identity: 'Arts & cafés', code: 'AL', x: 42, z: 42, color: '#9f7d93', description: 'Galleries, a cinema, colorful studios and a sculpture court.' },
 ];
 export function districtAt(x: number, z: number): District {
+  if (z >= 65 && Math.abs(x) < 25) return VISITOR_DISTRICT;
   const col = Math.max(0, Math.min(2, Math.floor((x + 63) / BLOCK_SIZE)));
   const row = Math.max(0, Math.min(2, Math.floor((z + 63) / BLOCK_SIZE)));
   return DISTRICTS[row * 3 + col];
 }
-export function districtDestination(d: District): Vec { return [d.x, 0, d.z + 18]; }
+export function districtDestination(d: District): Vec { return d.id === 'visitors' ? [0, 0, 82] : [d.x, 0, d.z + 18]; }
 export function roadDistance(n: number) { return Math.abs(n - Math.round(n / 21) * 21); }
 export type DetailGroup = { x: number; z: number; boxes: Box[] };
 export type BlockScene = {
@@ -166,9 +182,35 @@ export function generateWorld(maple: Box[]): CityWorld {
       name: 'Skyline River', kind: 'river', detail: 'An eastward current follows the southern waterfront, then spills over the city edge.' },
     { min: [RIVER.east, RIVER.bottom, RIVER.north], max: [RIVER.east + .45, RIVER.surface, RIVER.south],
       name: 'Infinity Falls', kind: 'waterfall', detail: 'The river slips over an open stone lip and falls into the mist below.' },
-    { min: [-66, 0, 65.65], max: [66, .32, 66], name: 'River embankment', kind: 'prop', finish: 'paint', tint: '#919c90' },
-    { min: [-66, 0, 76], max: [66, .25, 76.35], name: 'Outer riverbank', kind: 'prop', finish: 'paint', tint: '#919c90' },
+    ...[-66, 3].flatMap(x => [
+      { min: [x, 0, 65.65] as Vec, max: [x === -66 ? -3 : 66, .32, 66] as Vec, name: 'River embankment', kind: 'prop', finish: 'paint' as const, tint: '#919c90' },
+      { min: [x, 0, 76] as Vec, max: [x === -66 ? -3 : 66, .25, 76.35] as Vec, name: 'Outer riverbank', kind: 'prop', finish: 'paint' as const, tint: '#919c90' },
+    ]),
     { min: [-66.3, 0, 66], max: [-66, .25, 76.35], name: 'River headwall', kind: 'prop', finish: 'paint', tint: '#919c90' },
   );
+  const waterfront = world.blocks[0].coarse;
+  const yardProp = (b: Box, solid = true) => { waterfront.push(b); if (solid) world.colliders.push(b); };
+  yardProp({ min: [-3, -.4, 64], max: [3, .35, 78], name: 'Visitor Bridge', kind: 'bridge', detail: 'Cross the river to leave your name in the visitor yard.' }, false);
+  yardProp({ min: [-24, -12, 76.35], max: [24, -.06, 108], name: 'Visitor garden island', kind: 'cliff' }, false);
+  for (const x of [-3, 2.85]) {
+    yardProp({ min: [x, .35, 64], max: [x + .15, 1.25, 78], name: 'Bridge railing', kind: 'prop', finish: 'wood' });
+  }
+  for (const x of [-23.8, 23.5]) yardProp({ min: [x, 0, 76.4], max: [x + .3, .65, 108], name: 'Garden wall', kind: 'prop', finish: 'paint', tint: '#919c90' });
+  yardProp({ min: [-24, 0, 107.6], max: [24, .65, 108], name: 'Garden wall', kind: 'prop', finish: 'paint', tint: '#919c90' });
+  yardProp({ min: [-1.1, 0, 86], max: [1.1, 1.25, 87.2], name: 'Leave your name', kind: 'visitor-pedestal', detail: 'Leave a name slate to mark your visit.' });
+  for (const x of [-21, 21]) for (const z of [80, 104]) {
+    yardProp({ min: [x - .15, 0, z - .15], max: [x + .15, 3, z + .15], name: 'Willow trunk', kind: 'prop', finish: 'wood' });
+    yardProp({ min: [x - 1.4, 2.2, z - 1.4], max: [x + 1.4, 4, z + 1.4], name: 'Willow canopy', kind: 'foliage' }, false);
+  }
+  // Flush stone slots keep all garden aisles walkable, independent of loaded pages.
+  for (let i = 0; i < 48; i++) {
+    const [x, , z] = slatePosition(i);
+    yardProp({ min: [x - 1.15, .01, z - .6], max: [x + 1.15, .08, z + .6], name: 'Empty slate setting', kind: 'slate-empty' }, false);
+  }
   return world;
+}
+
+export function slatePosition(slot: number): Vec {
+  const column = slot % 8;
+  return [(column < 4 ? -17.5 + column * 4 : 5.5 + (column - 4) * 4), 0, 83 + Math.floor(slot / 8) * 4];
 }

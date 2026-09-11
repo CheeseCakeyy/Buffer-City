@@ -1,5 +1,6 @@
 import { detailGlyph, personModel, toWorld, vehicleModel } from './street-details';
-import { DISTRICTS, WORLD_LIMIT, RIVER, MAP_LIMIT, districtAt, districtDestination, generateWorld, roadDistance } from './city-world';
+import { DISTRICTS, RIVER, MAP_LIMIT, YARD, VISITOR_DISTRICT, hasGround, walkableGround, groundHeight, slatePosition, districtAt, districtDestination, generateWorld, roadDistance } from './city-world';
+import type { VisitorSlate } from './visitor-types';
 import { WalkingGrid } from './walking-grid';
 import type { Finish, Frame } from './street-details';
 import { GlyphAtlas } from './glyph-atlas';
@@ -27,6 +28,7 @@ export type CityStats = {
   selected: string;
   district?: string;
   identity?: string;
+  inVisitorYard?: boolean;
 };
 const dot = (a: Vec, b: Vec) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const mod = (n: number, m: number) => ((n % m) + m) % m;
@@ -115,8 +117,7 @@ export function intersectBox(o: Vec, d: Vec, b: Box): Hit | null {
 }
 export function canWalk(x: number, z: number, boxes: Box[]) {
   return (
-    Math.abs(x) < WORLD_LIMIT - 1 &&
-    Math.abs(z) < WORLD_LIMIT - 1 &&
+    walkableGround(x, z) &&
     !boxes.some(
       (b) =>
         b.min[1] < 1.6 &&
@@ -290,6 +291,26 @@ export class City {
   private objects: Box[] = [];
   private selected = 'Click a building to inspect it.';
   private selectedName = '';
+  private visitorSlates: VisitorSlate[] = [];
+  private slateBoxes: Box[] = [];
+  onVisitorSelect?: (slate: VisitorSlate | null) => void;
+  setVisitorSlates(slates: VisitorSlate[]) {
+    this.visitorSlates = slates;
+    this.slateBoxes = slates.map(slate => {
+      const [x, , z] = slatePosition(slate.slot);
+      return { min: [x - 1.15, .08, z - .6], max: [x + 1.15, .2, z + .6],
+        name: slate.name, kind: 'visitor-slate', feature: slate.id, detail: `Visited ${new Date(slate.createdAt).toLocaleDateString()}` };
+    });
+  }
+  focusVisitor(slate: VisitorSlate) {
+    const [x, , z] = slatePosition(slate.slot);
+    this.selectedName = slate.name;
+    this.selected = `${slate.name} · Visited ${new Date(slate.createdAt).toLocaleDateString()}`;
+    this.walkTo(x, z + 1.4);
+    this.overview = false;
+    this.span = 45;
+    this.reportAt = 0;
+  }
   private observer: ResizeObserver;
   private focus: Vec = [0, 0, 15];
   private path: Vec[] = [];
@@ -314,7 +335,7 @@ export class City {
   setOverview() {
     this.pov = 'third';
     this.overview = !this.overview;
-    this.span = this.overview ? 220 : 45;
+    this.span = this.overview ? 250 : 45;
     this.reportAt = 0;
   }
   private pointerdown = (e: PointerEvent) => {
@@ -353,7 +374,7 @@ export class City {
     return true;
   }
   visitDistrict(id: string) {
-    const district = DISTRICTS.find(d => d.id === id);
+    const district = [...DISTRICTS, VISITOR_DISTRICT].find(d => d.id === id);
     if (!district) return false;
     const target = districtDestination(district);
     const started = this.walkTo(target[0], target[2]);
@@ -500,11 +521,11 @@ export class City {
       this.right = [c, 0, -s];
       this.up = [-s * Math.sin(e), Math.cos(e), -c * Math.sin(e)];
       this.direction = [-s * Math.cos(e), -Math.sin(e), -c * Math.cos(e)];
-      this.center = [this.player[0], 1.65, this.player[2]];
+      this.center = [this.player[0], this.player[1] + 1.65, this.player[2]];
       if (this.pov === 'second') {
         // A raised boom behind the player looks along their heading. Both
         // movement and camera therefore use the same forward/right basis.
-        this.center = [this.player[0], 1.1, this.player[2]];
+        this.center = [this.player[0], this.player[1] + 1.1, this.player[2]];
         const behind: Vec = this.direction.map(v => -v) as Vec;
         let distance = this.followDistance ?? 5.5;
         for (const b of this.fixed) {
@@ -527,7 +548,7 @@ export class City {
     this.center = [
       (this.overview ? 0 : this.focus[0]) - this.direction[0] * 180,
       2 - this.direction[1] * 180,
-      (this.overview ? 0 : this.focus[2]) - this.direction[2] * 180,
+      (this.overview ? 14 : this.focus[2]) - this.direction[2] * 180,
     ];
   }
   private viewScale() {
@@ -651,7 +672,7 @@ export class City {
     if (t >= 0) {
       const x = o[0] + t * d[0],
         z = o[2] + t * d[2];
-      if (Math.abs(x) < WORLD_LIMIT && Math.abs(z) < WORLD_LIMIT)
+      if (hasGround(x, z))
         nearest = { t, normal: [0, 1, 0], box: null };
     }
     if (row >= 0) {
@@ -699,6 +720,15 @@ export class City {
       return;
     }
     this.selectedName = hit.box?.name || '';
+    if (hit.box?.kind === 'visitor-pedestal') this.onVisitorSelect?.(null);
+    if (hit.box?.kind === 'visitor-slate') {
+      const slate = this.visitorSlates?.find(s => s.id === hit.box?.feature);
+      if (slate) this.onVisitorSelect?.(slate);
+    }
+    if (hit.box && ['bridge', 'slate-empty'].includes(hit.box.kind)) {
+      this.walkTo(o[0] + hit.t * d[0], o[2] + hit.t * d[2]);
+      return;
+    }
     if (hit.box) {
       this.selected =
         hit.box.name +
@@ -771,6 +801,7 @@ export class City {
       if (canWalk(x, this.player[2], this.fixed)) this.player[0] = x;
       if (canWalk(this.player[0], z, this.fixed)) this.player[2] = z;
     }
+    this.player[1] = groundHeight(this.player[0], this.player[2]);
     const fx = this.player[0] - this.focus[0],
       fz = this.player[2] - this.focus[2],
       distance = Math.hypot(fx, fz),
@@ -821,7 +852,11 @@ export class City {
     }
     const walked = Math.hypot(this.player[0] - beforeX, this.player[2] - beforeZ);
     this.gait = (this.gait ?? 0) + walked * 6;
-    this.objects.push(...personModel(this.player[0], this.player[2], this.angle, this.gait, walked > 0.0001 ? 0.2 : 0, 0, true));
+    this.objects.push(...(this.slateBoxes ?? []));
+    const avatar = personModel(this.player[0], this.player[2], this.angle, this.gait, walked > 0.0001 ? 0.2 : 0, 0, true);
+    const frames = new Set(avatar.map(b => b.frame).filter(Boolean));
+    for (const frame of frames) if (frame) frame.origin[1] = this.player[1];
+    this.objects.push(...avatar);
   }
   private glyph(
     hit: Hit,
@@ -844,6 +879,10 @@ export class City {
         n[1] ? '#63865a' : n[0] ? '#b36850' : '#557aa2',
       ];
     if (!b) {
+      if (p[2] >= YARD.north) {
+        const path = Math.abs(p[0]) < 3 || Math.abs(mod(p[2] - 81, 4)) < .6;
+        return [path ? '.' : "'", night ? '#596f62' : path ? '#b2b5a3' : '#88a17e'];
+      }
       const rx = roadDistance(p[0]), rz = roadDistance(p[2]);
       if (rx < 2.4 || rz < 2.4) {
         glyph = ' ';
@@ -866,6 +905,10 @@ export class City {
     }
     if (b.kind === 'foliage')
       return [['&', '*', '#'][mod(Math.floor(p[0] * 5 + p[1] * 3 + p[2] * 4), 3)], night ? '#608c57' : '#4d844c'];
+    if (b.kind === 'bridge') return [mod(p[2] * 2, 1) < .15 ? '=' : '-', night ? '#b2ae8a' : '#8b8068'];
+    if (b.kind === 'slate-empty') return ['.', night ? '#52625a' : '#b1b7ad'];
+    if (b.kind === 'visitor-slate' || b.kind === 'visitor-pedestal')
+      return [n[1] ? '=' : ':', b.name === this.selectedName ? (night ? '#efc780' : '#a26930') : (night ? '#9cbab5' : '#678580')];
     if (b.kind === 'river') {
       const wave = mod(p[0] * .85 - this.elapsed * 1.8 + Math.sin(p[2] * 1.7) * .65, 4);
       const lip = p[0] > RIVER.east - .7;
@@ -1148,7 +1191,11 @@ export class City {
     for (const b of this.objects) {
       // Model surfaces carry their own local details. Outlining every small part
       // would fill the spaces between limbs, wheels, and bench slats with ink.
-      if (b.finish || !this.visibleObjects?.has(b) || ['foliage', 'river', 'waterfall', 'cliff'].includes(b.kind)) continue;
+      if (b.finish || !this.visibleObjects?.has(b) || ['foliage', 'river', 'waterfall', 'cliff', 'slate-empty'].includes(b.kind)) continue;
+      if (b.kind === 'visitor-slate') {
+        if (!this.overview) this.label(b.name.slice(0, 3).toUpperCase(), [b.min[0] + .2, .24, b.min[2] + .7], faint);
+        continue;
+      }
       if (b.kind === 'person' || b.kind === 'player') continue;
       this.outline(b, ink);
       if (b.kind === 'sign') {
@@ -1294,7 +1341,7 @@ export class City {
   }
   private drawPlayer(night: boolean) {
     if (this.perspective) return;
-    const p = this.project([this.player[0], 1.2, this.player[2]]),
+    const p = this.project([this.player[0], this.player[1] + 1.2, this.player[2]]),
       ink = night ? '#ffc16f' : '#b35325';
     const ctx = this.ctx;
     ctx.font = 'bold 17px "Courier New",monospace';
@@ -1323,6 +1370,8 @@ export class City {
       ctx.fillRect(px(d.x - 19), px(d.z - 19), 38 * scale, 38 * scale);
     }
     ctx.globalAlpha = 1;
+    ctx.fillStyle = night ? '#34584c' : '#c2d1bd';
+    ctx.fillRect(px(YARD.west), px(YARD.north), (YARD.east - YARD.west) * scale, (YARD.south - YARD.north) * scale);
     ctx.fillStyle = night ? '#647160' : '#bbbcae';
     for (const b of this.fixed) ctx.fillRect(px(b.min[0]), px(b.min[2]),
       (b.max[0] - b.min[0]) * scale, (b.max[2] - b.min[2]) * scale);
@@ -1330,9 +1379,11 @@ export class City {
     ctx.fillRect(px(RIVER.west), px(RIVER.north), (RIVER.east - RIVER.west) * scale, (RIVER.south - RIVER.north) * scale);
     ctx.fillStyle = night ? '#b9e7e0' : '#3e818e';
     ctx.fillRect(px(RIVER.east) - 1, px(RIVER.north), 2, (RIVER.south - RIVER.north) * scale);
+    ctx.fillStyle = night ? '#b2ae8a' : '#8b8068';
+    ctx.fillRect(px(-3), px(64), 6 * scale, 14 * scale);
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    for (const d of DISTRICTS) {
+    for (const d of [...DISTRICTS, VISITOR_DISTRICT]) {
       ctx.fillStyle = night ? '#19231ded' : '#faf9f5e8';
       ctx.fillRect(px(d.x) - 9, px(d.z) - 6, 18, 12);
       ctx.fillStyle = night ? '#d2d4bd' : '#51564a';
@@ -1424,6 +1475,7 @@ export class City {
         selected: this.selected,
         district: districtAt(this.player[0], this.player[2]).name,
         identity: districtAt(this.player[0], this.player[2]).identity,
+        inVisitorYard: this.player[2] > 78 && this.player[2] < YARD.south && Math.abs(this.player[0]) < 24,
       });
       this.frames = 0;
       this.reportAt = now;

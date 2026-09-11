@@ -1,7 +1,9 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { City, type CityStats } from '../lib/city';
-import { DISTRICTS } from '../lib/city-world';
+import { DISTRICTS, VISITOR_DISTRICT } from '../lib/city-world';
+import { VisitorYard } from '../components/visitor-yard';
+import type { VisitorSlate } from '../lib/visitor-types';
 export default function Home() {
   const map = useRef<HTMLCanvasElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null),
@@ -9,6 +11,11 @@ export default function Home() {
   const [panel, setPanel] = useState(false),
     [paused, setPaused] = useState(false),
     [mode, setMode] = useState('ink');
+  const [yardOpen, setYardOpen] = useState(false);
+  const [slate, setSlate] = useState<VisitorSlate | null>(null);
+  const selectSlate = useCallback((selected: VisitorSlate | null) => {
+    setSlate(selected); setYardOpen(true); setPanel(false);
+  }, []);
   const [stats, setStats] = useState<CityStats>({
     time: '09:00',
     fps: 0,
@@ -26,6 +33,7 @@ export default function Home() {
     if (!canvas.current) return;
     const city = new City(canvas.current, setStats);
     engine.current = city;
+    city.onVisitorSelect = selectSlate;
     if (map.current) city.attachMap(map.current);
     const lifecycle = new AbortController();
     const context = (
@@ -73,7 +81,7 @@ export default function Home() {
       city.destroy();
       engine.current = null;
     };
-  }, []);
+  }, [selectSlate]);
   useEffect(() => {
     if (engine.current) {
       engine.current.paused = paused;
@@ -92,7 +100,8 @@ export default function Home() {
           </div>
         </div>
         <div className="header-right">
-          <button aria-expanded={panel} aria-controls="city-explanation" onClick={() => setPanel(!panel)}>How it works ↗</button>
+          <button onClick={() => { setYardOpen(!yardOpen); setPanel(false); }}>Visitor yard</button>
+          <button aria-expanded={panel} aria-controls="city-explanation" onClick={() => { setPanel(!panel); setYardOpen(false); }}>How it works ↗</button>
         </div>
       </header>
       <section className="world" data-pov={pov} aria-label="Explorable ASCII city">
@@ -114,7 +123,7 @@ export default function Home() {
             canvas.current?.focus({ preventScroll: true });
           }}>
             <option value="" disabled>Walk to a neighborhood…</option>
-            {DISTRICTS.map(d => <option key={d.id} value={d.id}>{d.code} · {d.name} / {d.identity}</option>)}
+            {[...DISTRICTS, VISITOR_DISTRICT].map(d => <option key={d.id} value={d.id}>{d.code} · {d.name} / {d.identity}</option>)}
           </select>
         </div>
         <div className="legend" id="camera-hint">
@@ -187,6 +196,8 @@ export default function Home() {
         <div className="inspection">
           <p>{stats.selected}</p>
         </div>
+        {stats.inVisitorYard && !yardOpen && <button className="yard-arrival" onClick={() => selectSlate(null)}>Leave your name on a slate</button>}
+        <VisitorYard engine={engine} open={yardOpen} inYard={stats.inVisitorYard ?? false} selected={slate} onSelect={selectSlate} onClose={() => setYardOpen(false)} />
         <div className="touch-controls">
           {['↑', '←', '↓', '→'].map((label, i) => (
             <button
