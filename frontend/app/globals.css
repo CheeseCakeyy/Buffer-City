@@ -954,3 +954,53 @@ main .camera-controls select {
     padding: 8px 6px;
   }
 }
+
+/* Compact city HUD and an unobstructed view on every screen size. */
+.city-page .ui-toggle {
+  position: absolute;
+  z-index: 25;
+  left: 18px;
+  top: 100px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid #53645b;
+  border-radius: 6px;
+  background: #060f0ee8;
+  color: #c8cbbb;
+  font: 12px monospace;
+}
+.city-page:not(.ui-hidden) .ui-toggle { top: auto; bottom: 145px; }
+.city-page.ui-hidden > header,
+.city-page.ui-hidden > footer,
+.city-page.ui-hidden .world > :not(canvas) { display: none; }
+.city-page.ui-hidden .ui-toggle { top: 14px; opacity: .7; }
+.city-page.ui-hidden .ui-toggle:is(:hover, :focus-visible) { opacity: 1; }
+@media (max-width: 800px) {
+  .city-page { min-height: 0; height: 100dvh; overflow: hidden; }
+  .city-page header { height: 62px; padding: 8px 10px; gap: 5px; align-items: center; }
+  .city-page header h1 { width: auto; margin: 0; font-size: 15px; letter-spacing: -.6px; }
+  .city-page header p,
+  .city-page header h1 span,
+  .city-page .district-navigation,
+  .city-page .clock,
+  .city-page .legend,
+  .city-page .inspection,
+  .city-page footer > div:first-child { display: none; }
+  .city-page .header-right { display: flex; gap: 2px; flex-wrap: nowrap; }
+  .city-page .header-right > :is(button, a) { font-size: 10px; padding: 12px 3px; }
+  .city-page .neighborhood-map { top: 70px; right: 10px; bottom: auto; width: 96px; padding: 5px; }
+  .city-page .neighborhood-map canvas { display: block; width: 86px; height: 86px; }
+  .city-page .neighborhood-map small { display: none; }
+  .city-page:not(.ui-hidden) .ui-toggle { top: 70px; bottom: auto; left: 10px; }
+  .city-page .touch-controls { left: 10px; bottom: calc(155px + env(safe-area-inset-bottom)); gap: 5px; }
+  .city-page .touch-controls button { width: 44px; height: 44px; padding: 0; }
+  .city-page .camera-controls {
+    left: 10px; right: 10px; width: auto; max-width: none; transform: none;
+    bottom: calc(54px + env(safe-area-inset-bottom)); padding: 4px;
+    display: flex; flex-wrap: wrap; gap: 0; border-radius: 6px;
+  }
+  .city-page .camera-controls select { flex: 0 0 100%; min-height: 36px; padding: 5px 9px; font-size: 12px; }
+  .city-page .camera-controls button { min-height: 40px; padding: 5px 4px; font-size: 11px; }
+  .city-page footer { min-height: 48px; padding: 4px 10px calc(4px + env(safe-area-inset-bottom)); justify-content: center; }
+  .city-page .footer-actions { gap: 12px; }
+}

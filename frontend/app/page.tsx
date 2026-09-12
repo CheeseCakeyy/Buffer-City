@@ -13,6 +13,7 @@ export default function Home() {
     [paused, setPaused] = useState(false),
     [mode, setMode] = useState('ink');
   const [yardOpen, setYardOpen] = useState(false);
+  const [uiHidden, setUiHidden] = useState(false);
   const [slate, setSlate] = useState<VisitorSlate | null>(null);
   const selectSlate = useCallback((selected: VisitorSlate | null) => {
     setSlate(selected); setYardOpen(true);
@@ -92,7 +93,12 @@ export default function Home() {
   }, [paused, mode, credits]);
   return (
     <>
-    <main>
+    <main className={uiHidden ? 'city-page ui-hidden' : 'city-page'}>
+      <button className="ui-toggle" aria-pressed={uiHidden} onClick={() => {
+        setUiHidden(!uiHidden);
+        setYardOpen(false);
+        engine.current?.keys.clear();
+      }}>{uiHidden ? 'Show UI' : 'Hide UI'}</button>
       <header>
         <div className="brand">
           <div>
