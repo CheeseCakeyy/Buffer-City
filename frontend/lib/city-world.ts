@@ -35,7 +35,7 @@ export const DISTRICTS: District[] = [
   { id: 'civic', name: 'Civic Quarter', identity: 'Civic', code: 'CQ', x: 42, z: 0, color: '#7b8a97', description: 'City hall, an archive, a clock tower and a fountain plaza.' },
   { id: 'depot', name: 'Depot Yard', identity: 'Industrial', code: 'DY', x: -42, z: 42, color: '#7e8885', description: 'Bus shelters, a depot canopy, warehouses and freight containers.' },
   { id: 'garden', name: 'Garden Courts', identity: 'Residential gardens', code: 'GC', x: 0, z: 42, color: '#889b65', description: 'Low courtyard homes, raised planting beds and sheltered seating.' },
-  { id: 'arts', name: 'Arts Lane', identity: 'Arts & cafés', code: 'AL', x: 42, z: 42, color: '#9f7d93', description: 'Galleries, a cinema, colorful studios and a sculpture court.' },
+  { id: 'arts', name: 'Arts Lane', identity: 'Arts & cafés', code: 'AL', x: 42, z: 42, color: '#9f7d93', description: 'Galleries, a cinema, colorful studios and an open courtyard.' },
 ];
 export function districtAt(x: number, z: number): District {
   if (z >= 65 && Math.abs(x) < 25) return VISITOR_DISTRICT;
@@ -150,9 +150,6 @@ export function generateWorld(maple: Box[]): CityWorld {
       add(-16, -16, 11, 8, 6, 'Ink Gallery'); add(5, -16, 11, 10, 8, 'Lantern Cinema');
       add(-16, 5, 6, 11, 5, 'Clay Studio'); add(-8, 6, 5, 8, 4, 'Violet Coffee');
       add(11, 6, 5, 10, 6.5, 'Print Works');
-      prop(5, 9, 2, 2, .4, 'Sculpture plinth', 'metal');
-      prop(5.4, 9.4, .4, .4, 3.7, 'Street sculpture', 'paint', .4, '#ad755b');
-      prop(4.6, 9.4, 2.4, .4, .4, 'Sculpture crosspiece', 'paint', 2.7, '#ad755b');
       bench(6, 15); tree(-4, -5);
     }
     const localBuildings = scene.coarse.filter(b => b.kind === 'building');

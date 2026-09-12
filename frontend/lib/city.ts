@@ -1013,7 +1013,7 @@ export class City {
     this.priorities.fill(0);
     this.glyphs.fill(' ');
     const ctx = this.ctx;
-    ctx.fillStyle = '#18221d';
+    ctx.fillStyle = '#060f0e';
     ctx.fillRect(0, 0, this.width, this.height);
     ctx.font = '9px "Courier New",monospace';
     ctx.textBaseline = 'top';
@@ -1383,7 +1383,7 @@ export class City {
       ink = '#ffc16f';
     const ctx = this.ctx;
     ctx.font = 'bold 17px "Courier New",monospace';
-    ctx.fillStyle = '#18221de8';
+    ctx.fillStyle = '#060f0ee8';
     ctx.fillRect(p[0] - 7, p[1] - 5, 16, 21);
     ctx.fillStyle = ink;
     ctx.fillText('@', Math.round(p[0] - 5), Math.round(p[1] - 4));
@@ -1422,7 +1422,7 @@ export class City {
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const d of [...DISTRICTS, VISITOR_DISTRICT]) {
-      ctx.fillStyle = '#19231ded';
+      ctx.fillStyle = '#0b1513ed';
       ctx.fillRect(px(d.x) - 9, px(d.z) - 6, 18, 12);
       ctx.fillStyle = '#d2d4bd';
       ctx.fillText(d.code, px(d.x), px(d.z));
