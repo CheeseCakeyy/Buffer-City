@@ -1,4 +1,0 @@
-BACKEND_URL=http://127.0.0.1:8000
-# Match the Python backend. Production: use a random secret, 32+ characters.
-BACKEND_PROXY_SECRET=
-

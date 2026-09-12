@@ -5,7 +5,7 @@ An explorable ASCII city with nine neighborhoods, a river and waterfall, and a v
 ## Repository layout
 
 ```text
-frontend/           React/Vinext app, renderer, assets, npm files, builds and tests
+frontend/           React/Next.js app, renderer, assets, npm files, builds and tests
 backend/            Python/FastAPI app, Chroma Cloud client, import tools, tests and Dockerfile
 README.md           Setup and deployment
 HOW_IT_WORKS.md     How the city and visitor yard work
@@ -15,7 +15,7 @@ The root also contains Git's hidden `.git/` and `.gitignore`. All application co
 
 ## Run locally
 
-Use Python 3.11+ and Node 22.13+.
+Use Python 3.11 and Node 22.x.
 
 **Backend — terminal 1**
 
@@ -42,7 +42,7 @@ Open the frontend URL printed by the server (normally http://localhost:3000). Th
 
 Choose **Visitor yard**, cross the bridge, and leave your name. Names are saved in Chroma Cloud and survive backend restarts and redeployments. Existing SQLite files and the original D1 backup remain local until explicitly imported; they are not read by the running API.
 
-Local development has matching development-only secrets in both services. For customization, copy `backend/.env.example` to `backend/.env` and `frontend/.dev.vars.example` to `frontend/.dev.vars`. Both files are ignored by Git. `PUBLIC_ORIGIN` must match the browser's frontend origin.
+Local development has matching development-only secrets in both services. For customization, copy `backend/.env.example` to `backend/.env` and `frontend/.env.example` to `frontend/.env.local`. Both files are ignored by Git. `PUBLIC_ORIGIN` must match the browser's frontend origin.
 
 ## Checks
 
@@ -65,39 +65,16 @@ The frontend checks cover geometry, walking routes, cameras, full names and cent
 
 ## Deployment
 
-Deploy the two folders as separate services.
+The frontend is configured for **Vercel** and the FastAPI backend for **Render**.
 
-- **Frontend:** set its project directory to `frontend/`, install with `npm ci`, and build with `npm run build`. The retained Sites/Cloudflare build configuration lives in `frontend/.openai/` and `frontend/vite.config.ts`. Output is `frontend/dist/`.
-- **Backend on Render:** create a Python web service with root directory `backend`, build command `pip install -r requirements.txt`, start command `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --no-proxy-headers`, and health check `/health`. No persistent disk is needed. Alternatively build the Dockerfile with `backend/` as its context.
-- **Database:** create/select a Chroma Cloud database and configure the following values in Render's **Environment** settings. The backend uses `chromadb.CloudClient` via the lightweight `chromadb-client` package. Names are metadata with a fixed placeholder vector; no embedding model or separate AI API is needed.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete setup, environment-variable tables, deployment order and verification steps.
 
-Configure these server-side environment values:
+- Vercel: root directory `frontend`, Next.js preset, `npm ci`, `npm run build`, framework-default output directory.
+- Render: import the root `render.yaml` Blueprint. It uses the `backend` directory, one Python worker, one instance and the `/health` check. The configured compute plan is paid; review it before creating the service.
+- The browser calls Vercel's `/api/visitors`; only that server-side proxy knows the backend URL and shared secret.
+- Existing Chroma Cloud slates remain in the same collection. Preserve the production visitor secret and never run two writers against that collection, including during rolling backend deployments.
 
-| Service | Variable | Purpose |
-| --- | --- | --- |
-| Frontend | `BACKEND_URL` | Reachable HTTPS URL of the Python service |
-| Both | `BACKEND_PROXY_SECRET` | Same random secret, at least 32 characters |
-| Backend | `ENVIRONMENT` | `production` |
-| Backend | `PUBLIC_ORIGIN` | Exact HTTPS origin of the frontend |
-| Backend | `VISITOR_SECRET` | Stable random secret, at least 32 characters |
-| Backend | `VISITOR_ADMIN_TOKEN` | Separate random moderation token, at least 32 characters |
-| Backend | `CHROMA_API_KEY` | Private Chroma Cloud API key; never put it in code |
-| Backend | `CHROMA_TENANT` | Tenant identifier from the Chroma dashboard |
-| Backend | `CHROMA_DATABASE` | Exact database name selected in Chroma Cloud |
-| Backend | `CHROMA_COLLECTION` | `city_visitors_v1` by default; use a dedicated collection |
-| Backend | `WEB_CONCURRENCY` | `1` |
-
-The browser always calls its own frontend origin. The frontend authenticates requests to Python and forwards cookies; database code and credentials are never shipped to the browser. Direct requests to the Python visitor API require the proxy credential. `/health` reports database readiness without credentials.
-
-Only variable names and blank credential placeholders are committed. Keep Chroma credentials and the tenant identifier in Render's environment (or ignored `backend/.env` for local use), never in frontend variables. This repository cannot configure Render's dashboard by itself.
-
-Keep `VISITOR_SECRET` stable: changing it breaks recognition of existing browser cookies. When importing records, preserve the secret that created their visitor hashes. Do not reuse development-only fallback secrets in production.
-
-**One active writer per collection is required.** A process lock protects slot allocation and the per-network quota; Chroma does not provide the SQL transaction previously used for these operations. Use one instance and one worker. Do not run local and production backends against the same collection. Render's rolling deployments can briefly overlap instances, so stop/suspend the old writer before deploying/resuming its replacement and turn off automatic deploys for this setup. Likewise, stop the API before importing. Multi-instance or overlapping writers require additional distributed coordination before enabling them.
-
-Reads currently scan visitor metadata in batches of 300 to compute totals, find the highest assigned slot and enforce quotas. This is intended for a small visitor garden; read cost and latency grow with the record count. Cloud failures return a generic 503 without SDK request details. The old SQL migration is retained only as the documented legacy schema/import test fixture.
-
-No build or test command deploys either service.
+No build or test command deploys either service. Cloudflare bindings and Wrangler are no longer required; frontend configuration now lives in `.env.local` locally or Vercel's server-side environment variables.
 
 ## Visitor records and moderation
 

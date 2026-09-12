@@ -1,0 +1,35 @@
+# Create a Render Blueprint from this repository. Supply prompted secrets there.
+services:
+  - type: web
+    name: ascii-city-api
+    runtime: python
+    rootDir: backend
+    plan: 0.5c-512mb
+    numInstances: 1
+    autoDeployTrigger: off
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --no-proxy-headers
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: ENVIRONMENT
+        value: production
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: PUBLIC_ORIGIN
+        sync: false
+      - key: BACKEND_PROXY_SECRET
+        sync: false
+      - key: VISITOR_SECRET
+        sync: false
+      - key: VISITOR_ADMIN_TOKEN
+        sync: false
+      - key: CHROMA_API_KEY
+        sync: false
+      - key: CHROMA_TENANT
+        sync: false
+      - key: CHROMA_DATABASE
+        sync: false
+      - key: CHROMA_COLLECTION
+        value: city_visitors_v1

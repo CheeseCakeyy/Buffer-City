@@ -1,11 +1,11 @@
-import { env } from 'cloudflare:workers';
-
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 async function handle(request: Request) {
-  const bindings = env as { BACKEND_URL?: string; BACKEND_PROXY_SECRET?: string };
+  const bindings = process.env;
   const url = new URL(request.url);
-  const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  const local = process.env.NODE_ENV === 'development' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
   const backend = bindings.BACKEND_URL || (local ? 'http://127.0.0.1:8000' : '');
   const secret = bindings.BACKEND_PROXY_SECRET || (local ? 'local-only-proxy-secret-00000000000000' : '');
   const unavailable = () => Response.json({ error: 'The visitor yard is temporarily unavailable. Please try again.' }, { status: 503 });
@@ -13,6 +13,8 @@ async function handle(request: Request) {
   if (request.method !== 'GET' && ((request.headers.get('origin') && request.headers.get('origin') !== url.origin) || request.headers.get('sec-fetch-site') === 'cross-site'))
     return Response.json({ error: 'Please leave your slate from the city website.' }, { status: 403 });
   try {
+    const target = new URL('/api/visitors', backend); target.search = url.search;
+    if (process.env.NODE_ENV === 'production' && target.protocol !== 'https:') return unavailable();
     let body: Uint8Array<ArrayBuffer> | undefined;
     if (request.method !== 'GET' && request.body) {
       const reader = request.body.getReader();
@@ -32,9 +34,10 @@ async function handle(request: Request) {
       const value = request.headers.get(name); if (value) headers.set(name, value);
     }
     headers.set('x-city-proxy-token', secret);
-    headers.set('x-city-client-ip', local ? 'local-preview' : request.headers.get('cf-connecting-ip') || 'unknown');
-    const target = new URL('/api/visitors', backend); target.search = url.search;
-    const response = await fetch(target, { method: request.method, headers, body, redirect: 'manual', signal: AbortSignal.timeout(10_000) });
+    // Only trust the ingress IP header when actually hosted by Vercel.
+    const clientIp = process.env.VERCEL === '1' ? request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() : undefined;
+    headers.set('x-city-client-ip', local ? 'local-preview' : clientIp || 'unknown');
+    const response = await fetch(target, { method: request.method, headers, body, redirect: 'manual', cache: 'no-store', signal: AbortSignal.timeout(10_000) });
     if (response.status >= 300 && response.status < 400) return unavailable();
     const outgoing = new Headers({ 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' });
     for (const name of ['set-cookie', 'retry-after']) {
